@@ -4,14 +4,17 @@ import {
 } from './engine.js';
 import { BY_ID, PATTERN_LABEL } from './exercises.js';
 import { photos, videoUrl } from './media.js';
+import * as Sync from './sync.js';
 
 // ---------- État persistant ----------
 const KEY = 'forge.v1';
 function load() {
   try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
 }
-const state = Object.assign({ profile: null, history: [], weights: [], drafts: {} }, load());
-function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* stockage indisponible */ } }
+const state = Object.assign({ profile: null, history: [], weights: [], drafts: {}, deleted: [] }, load());
+function saveLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* stockage indisponible */ } }
+function save() { saveLocal(); Sync.schedule(); }
+const touchProfile = () => { if (state.profile) state.profile.updatedAt = new Date().toISOString(); };
 
 const $app = document.getElementById('app');
 const $tab = document.getElementById('tabbar');
@@ -30,8 +33,10 @@ const ROLE = { main: 'Principal', sec: 'Secondaire', acc: 'Accessoire' };
 
 // ---------- Routage ----------
 function route() {
-  if (!state.profile) return renderOnboarding();
   const [, page = 'today', a, b] = location.hash.split('/');
+  if (page === 'login') return renderLogin();
+  if (page === 'password') return renderNewPassword();
+  if (!state.profile) return renderOnboarding();
   $tab.hidden = false;
   $tab.querySelectorAll('a').forEach((x) => x.classList.toggle('on', x.dataset.tab === (page === 'session' ? 'program' : page)));
   window.scrollTo(0, 0);
@@ -76,7 +81,7 @@ function renderOnboarding(existing) {
   const stepsHtml = existing ? [s1 + s2 + s3] : [s1, s2, s3, '<div id="summary"></div>'];
   $app.innerHTML = `
     <div class="onb">
-      ${existing ? '<div class="eyebrow">Profil</div><h1>Modifier mes infos</h1>' : '<div class="eyebrow">Forge</div><h1>Ton coach muscu personnel</h1><p class="muted">4 questions pour construire un programme qui te ressemble et se renouvelle chaque semaine.</p>'}
+      ${existing ? '<div class="eyebrow">Profil</div><h1>Modifier mes infos</h1>' : `<div class="eyebrow">Forge</div><h1>Ton coach muscu personnel</h1><p class="muted">4 questions pour construire un programme qui te ressemble et se renouvelle chaque semaine.</p>${Sync.getStatus().configured ? '<p class="small"><a href="#/login" style="color:var(--accent)">Déjà un compte ? Me connecter pour retrouver mon programme</a></p>' : ''}`}
       ${existing ? '' : `<div class="progress-dots">${stepsHtml.map(() => '<i></i>').join('')}</div>`}
       <form id="onb">${stepsHtml.map((h, i) => `<section class="onb-step" data-step="${i}">${h}</section>`).join('')}
         <div class="sticky-actions row">
@@ -157,7 +162,7 @@ function renderOnboarding(existing) {
       state.profile = { ...draft, startDate: new Date().toISOString(), swaps: {} };
       state.weights.push({ date: new Date().toISOString(), kg: draft.weight });
     }
-    save(); location.hash = existing ? '#/profile' : '#/today'; route();
+    touchProfile(); save(); location.hash = existing ? '#/profile' : '#/today'; route();
   });
   show();
 }
@@ -194,6 +199,8 @@ function renderToday() {
       <span class="pill">Cycle ${blockOf(week) + 1}</span>
       <span class="pill">${doneThisWeek}/${p.days.length} séances</span>
     </div>
+    ${Sync.getStatus().configured && !Sync.getStatus().connected ? `<a class="card row between" href="#/profile" style="border-color:rgba(124,196,255,.35)">
+      <div><h3>☁ Sauvegarde ton programme</h3><div class="small muted">Crée ton compte pour ne jamais perdre tes séances.</div></div><span class="chev">›</span></a>` : ''}
     ${main}
     <h2>Ta journée</h2>
     <div class="grid2">
@@ -320,6 +327,7 @@ function renderSession(week, dayIndex) {
   if (locked) {
     $app.querySelector('#reopen').onclick = () => {
       state.history = state.history.filter((h) => h !== data);
+      state.deleted = [...(state.deleted || []), data.date];
       state.drafts[key] = { exercises: Object.fromEntries(data.exercises.map((x) => [x.slot, { id: x.id, sets: x.sets }])) };
       save(); route();
     };
@@ -363,7 +371,7 @@ function renderSession(week, dayIndex) {
       p.swaps = p.swaps || {};
       p.swaps[`${week}|${dayIndex}|${slot}`] = next.id;
       delete data.exercises[slot];
-      save(); route();
+      touchProfile(); save(); route();
     };
   });
   $app.querySelector('#finish').onclick = () => {
@@ -502,7 +510,7 @@ function renderProgress() {
     if (!(v > 30 && v < 300)) return;
     state.weights.push({ date: new Date().toISOString(), kg: v });
     state.profile.weight = v; // le bilan nutritionnel et les charges de départ suivent le poids
-    save(); route();
+    touchProfile(); save(); route();
   };
 }
 
@@ -548,24 +556,118 @@ function renderProfile() {
       <div class="tip">Répartition : <b>${m.protein} g</b> protéines · <b>${m.carbs} g</b> glucides · <b>${m.fat} g</b> lipides</div>
       <p class="small muted" style="margin:8px 0 0">Estimations (formule de Mifflin-St Jeor). Ajuste de 150 kcal si ton poids ne suit pas l’objectif après 2 semaines.</p>
     </div>
+    <h2>Compte et sauvegarde</h2>
+    ${accountCard()}
     <h2>Données</h2>
     <div class="card">
-      <p class="small muted">Tout est enregistré sur ce téléphone, rien n’est envoyé sur internet.</p>
-      <div class="row"><button class="btn ghost" id="export" style="flex:1">Exporter</button><button class="btn danger" id="reset" style="flex:1">Tout effacer</button></div>
+      <p class="small muted">${Sync.getStatus().connected ? 'Effacer ne touche que ce téléphone : tes données restent dans ton compte.' : 'Sans compte, tout est enregistré uniquement sur ce téléphone.'}</p>
+      <div class="row"><button class="btn ghost" id="export" style="flex:1">Exporter</button><button class="btn danger" id="reset" style="flex:1">Effacer ce téléphone</button></div>
     </div>
     <p class="small muted center">Photos des exercices : Free Exercise DB (domaine public).</p>
     <p class="small muted center">Forge ne remplace pas un avis médical. En cas de douleur ou de pathologie, consulte un professionnel.</p>`;
-  $app.querySelector('#reset').onclick = () => {
-    if (!confirm('Effacer le profil, l’historique et les pesées ?')) return;
+  $app.querySelector('#reset').onclick = async () => {
+    if (!confirm('Effacer le profil, l’historique et les pesées de ce téléphone ?')) return;
+    await Sync.signOut().catch(() => {});
     try { localStorage.removeItem(KEY); } catch { /* rien */ }
-    Object.assign(state, { profile: null, history: [], weights: [], drafts: {} });
+    Object.assign(state, { profile: null, history: [], weights: [], drafts: {}, deleted: [] });
     location.hash = ''; route();
   };
+  bindAccount();
   $app.querySelector('#export').onclick = () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'forge-sauvegarde.json'; a.click();
   };
 }
 
+// ---------- Compte ----------
+function accountCard() {
+  const st = Sync.getStatus();
+  if (!st.configured) return '<div class="card"><p class="small muted" style="margin:0">La sauvegarde en ligne n’est pas encore activée.</p></div>';
+  if (st.connected) {
+    const when = st.lastSync ? `Dernière sauvegarde : ${st.lastSync.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}` : 'Synchronisation…';
+    return `<div class="card">
+      <div class="row between"><div><h3>☁ ${esc(st.email)}</h3><div class="small muted">${st.pending ? 'Envoi en attente…' : when}</div></div><span class="pill ok">Connecté</span></div>
+      ${st.error ? `<p class="small" style="color:var(--warn);margin:10px 0 0">${esc(st.error)}</p>` : ''}
+      <p class="small muted" style="margin:10px 0">Profil, séances, charges et pesées sont sauvegardés dans ton compte. Sur un nouveau téléphone, connecte-toi pour tout retrouver.</p>
+      <div class="row"><button class="btn ghost" id="syncnow" style="flex:1">Synchroniser</button><button class="btn ghost" id="logout" style="flex:1">Se déconnecter</button></div>
+    </div>`;
+  }
+  return `<div class="card">${authForm('Crée ton compte pour sauvegarder ton programme et le retrouver sur n’importe quel téléphone.')}</div>`;
+}
+
+function authForm(intro) {
+  return `<p class="small muted">${intro}</p>
+    <form id="auth">
+      <label class="field"><span>Email</span><input type="email" name="email" autocomplete="email" required style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:12px;font:inherit"></label>
+      <label class="field"><span>Mot de passe (6 caractères minimum)</span><input type="password" name="password" autocomplete="current-password" minlength="6" required style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:12px;font:inherit"></label>
+      <p class="small" id="authmsg" style="min-height:1em"></p>
+      <div class="row"><button class="btn primary" data-act="signin" style="flex:1">Se connecter</button><button class="btn ghost" data-act="signup" style="flex:1">Créer mon compte</button></div>
+      <p class="small center" style="margin-top:12px"><a href="#" id="forgot" class="muted">Mot de passe oublié ?</a></p>
+    </form>`;
+}
+
+function bindAccount(after) {
+  $app.querySelector('#syncnow')?.addEventListener('click', () => Sync.syncNow());
+  $app.querySelector('#logout')?.addEventListener('click', async () => { await Sync.signOut(); route(); });
+  const form = $app.querySelector('#auth'); if (!form) return;
+  const msg = form.querySelector('#authmsg');
+  const say = (t, ok) => { msg.textContent = t; msg.style.color = ok ? 'var(--ok)' : 'var(--warn)'; };
+  let act = 'signin';
+  form.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => { act = b.dataset.act; }));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = form.email.value.trim(); const pw = form.password.value;
+    form.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    try {
+      if (act === 'signup') {
+        const r = await Sync.signUp(email, pw);
+        if (r.needsConfirmation) { say('Compte créé. Ouvre l’email de confirmation, clique sur le lien, puis reviens te connecter ici.', true); return; }
+      } else {
+        await Sync.signIn(email, pw);
+      }
+      if (after) after(); else route();
+    } catch (err) { say(err.message); } finally { form.querySelectorAll('button').forEach((b) => { b.disabled = false; }); }
+  });
+  form.querySelector('#forgot').addEventListener('click', async (e) => {
+    e.preventDefault();
+    const email = form.email.value.trim();
+    if (!email) return say('Saisis d’abord ton email.');
+    try { await Sync.resetPassword(email); say('Email envoyé : suis le lien pour choisir un nouveau mot de passe.', true); } catch (err) { say(err.message); }
+  });
+}
+
+function renderLogin() {
+  $tab.hidden = true;
+  if (Sync.getStatus().connected) { location.hash = '#/today'; return; }
+  $app.innerHTML = `<a class="small muted" href="#/">‹ Retour</a>
+    <div class="eyebrow" style="margin-top:10px">Forge</div><h1>Retrouver mon programme</h1>
+    <div class="card" style="margin-top:14px">${authForm('Connecte-toi avec le compte créé sur ton autre téléphone ou avant une réinstallation.')}</div>`;
+  bindAccount(() => { location.hash = state.profile ? '#/today' : '#/'; route(); });
+}
+
+function renderNewPassword() {
+  $tab.hidden = true;
+  $app.innerHTML = `<div class="eyebrow">Compte</div><h1>Nouveau mot de passe</h1>
+    <form id="np" class="card" style="margin-top:14px">
+      <label class="field"><span>Nouveau mot de passe</span><input type="password" name="pw" minlength="6" required autocomplete="new-password" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:12px;font:inherit"></label>
+      <p class="small" id="npmsg"></p><button class="btn primary block">Enregistrer</button></form>`;
+  $app.querySelector('#np').onsubmit = async (e) => {
+    e.preventDefault();
+    try { await Sync.updatePassword(e.target.pw.value); location.hash = '#/today'; route(); } catch (err) { $app.querySelector('#npmsg').textContent = err.message; }
+  };
+}
+
 route();
+// Le compte se branche après le premier affichage : l'appli reste utilisable hors ligne.
+Sync.init({
+  get: () => state,
+  set: (merged) => { Object.assign(state, merged); saveLocal(); },
+  changed: () => {
+    const [, page = 'today', sub] = location.hash.split('/');
+    // On ne redessine jamais un écran en cours de saisie (questionnaire, séance, connexion, champ actif).
+    if (!state.profile || ['session', 'login', 'password'].includes(page) || sub === 'edit') return;
+    if (document.activeElement && document.activeElement.matches('input')) return;
+    route();
+  },
+});
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
