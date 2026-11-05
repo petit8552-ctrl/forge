@@ -17,14 +17,61 @@ export const DEFAULT_DAYS = {
   2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 4, 5], 6: [0, 1, 2, 3, 4, 5],
 };
 
+// ---------- Données Apple Santé ----------
+const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const isoDay = (d) => d.toISOString().slice(0, 10);
+
+// Forme du jour à partir du sommeil, du cœur au repos et de la VFC, comparés à ta moyenne des 14 jours précédents.
+export function readiness(health = [], date = new Date()) {
+  if (!health.length) return null;
+  const rows = [...health].sort((a, b) => a.day.localeCompare(b.day));
+  const today = isoDay(date);
+  const yest = isoDay(new Date(date.getTime() - 864e5));
+  const last = rows[rows.length - 1];
+  if (last.day !== today && last.day !== yest) return null;
+  const before = rows.filter((r) => r.day < last.day).slice(-14);
+  const base = (k) => { const v = before.map((r) => Number(r[k])).filter((x) => x > 0); return v.length >= 3 ? avg(v) : null; };
+  let score = 0; const reasons = []; let measured = 0;
+  if (last.sleep_min) {
+    measured++;
+    const h = last.sleep_min / 60;
+    if (h < 5) { score -= 2; reasons.push(`nuit courte (${fmtH(last.sleep_min)})`); }
+    else if (h < 6) { score -= 1; reasons.push(`sommeil un peu court (${fmtH(last.sleep_min)})`); }
+  }
+  if (last.resting_hr) {
+    measured++;
+    const b = base('resting_hr');
+    if (b && last.resting_hr > b + 7) { score -= 2; reasons.push(`cœur au repos élevé (${Math.round(last.resting_hr)} contre ${Math.round(b)} bpm d’habitude)`); }
+    else if (b && last.resting_hr > b + 4) { score -= 1; reasons.push(`cœur au repos un peu haut (${Math.round(last.resting_hr)} bpm)`); }
+  }
+  if (last.hrv) {
+    measured++;
+    const b = base('hrv');
+    if (b && last.hrv < b * 0.8) { score -= 2; reasons.push('variabilité cardiaque basse'); }
+    else if (b && last.hrv < b * 0.9) { score -= 1; reasons.push('variabilité cardiaque en baisse'); }
+  }
+  if (!measured) return { level: null, last, reasons };
+  const level = score >= 0 ? 'bonne' : score === -1 ? 'moyenne' : 'basse';
+  return { level, score, last, reasons };
+}
+export function fmtH(min) { return `${Math.floor(min / 60)} h ${String(Math.round(min % 60)).padStart(2, '0')}`; }
+
+// Dépense réelle mesurée (moyenne des 7 derniers jours d'énergie active), si au moins 3 jours disponibles.
+function measuredActive(health = []) {
+  const v = [...health].sort((a, b) => a.day.localeCompare(b.day)).slice(-7).map((r) => Number(r.active_kcal)).filter((x) => x > 0);
+  return v.length >= 3 ? avg(v) : null;
+}
+
 // ---------- Bilan corporel ----------
-export function bodyMetrics(p) {
+export function bodyMetrics(p, health) {
   const h = p.height / 100;
   const bmi = p.weight / (h * h);
   const bmr = 10 * p.weight + 6.25 * p.height - 5 * p.age + (p.sex === 'f' ? -161 : 5);
   const sessions = p.days.length;
   const activity = 1.2 + 0.06 * sessions + (p.dailyActivity === 'actif' ? 0.1 : p.dailyActivity === 'sedentaire' ? 0 : 0.05);
-  const tdee = bmr * activity;
+  // Avec la montre : métabolisme + petite marge + énergie active réellement mesurée.
+  const active = measuredActive(health);
+  const tdee = active ? bmr * 1.15 + active : bmr * activity;
   // Surplus léger en prise de muscle, déficit de 20 % plafonné à 600 kcal en sèche.
   const target = {
     masse: tdee + (bmi < 18.5 ? 400 : 300),
@@ -41,7 +88,7 @@ export function bodyMetrics(p) {
   const water = Math.round((p.weight * 0.035 + 0.5) * 10) / 10;
   let bmiLabel = 'Corpulence normale';
   if (bmi < 18.5) bmiLabel = 'Maigreur'; else if (bmi >= 30) bmiLabel = 'Obésité'; else if (bmi >= 25) bmiLabel = 'Surpoids';
-  return { bmi, bmiLabel, bmr: Math.round(bmr), tdee: Math.round(tdee), kcal, protein, fat, carbs, water };
+  return { bmi, bmiLabel, bmr: Math.round(bmr), tdee: Math.round(tdee), kcal, protein, fat, carbs, water, measured: !!active, active: active && Math.round(active) };
 }
 
 // Conseils généraux adaptés au profil.
@@ -205,7 +252,7 @@ export function suggestLoad(ex, p, history, scheme, phaseKey) {
 }
 
 // ---------- Génération d'une séance ----------
-export function buildSession(p, week, dayIndex, history = []) {
+export function buildSession(p, week, dayIndex, history = [], ready = null) {
   const split = splitFor(p.days.length);
   const tpl = split.days[dayIndex];
   const phase = phaseOf(week);
@@ -252,9 +299,25 @@ export function buildSession(p, week, dayIndex, history = []) {
     cardio = pool[(week + dayIndex * 3) % pool.length];
   }
 
+  // Ajustement selon la forme du jour (uniquement pour la séance du jour, données de la montre).
+  let adjust = null;
+  if (ready && ready.level === 'moyenne' && phase.key !== 'deload') {
+    for (const e of exercises) if (e.role !== 'acc') e.rir += 1;
+    adjust = { level: 'moyenne', text: `Forme moyenne (${ready.reasons.join(', ')}) : garde 1 répétition de plus en réserve sur les exercices principaux.` };
+  } else if (ready && ready.level === 'basse') {
+    for (const e of exercises) {
+      e.sets = Math.max(2, e.sets - 1);
+      e.rir += 1;
+      if (e.load) { e.load = Math.max(step(BY_ID[e.id]), round(e.load * 0.9, step(BY_ID[e.id]))); e.loadNote = 'Charge allégée de 10 % : récupération insuffisante.'; }
+    }
+    technique = null;
+    if (cardio) cardio = { name: 'Cardio très léger', detail: '15 min de marche ou de vélo facile, sans essoufflement.', impact: 'low' };
+    adjust = { level: 'basse', text: `Récupération insuffisante (${ready.reasons.join(', ')}) : une série de moins partout, charges −10 %, pas de technique d’intensité.` };
+  }
+
   const warmup = warmupFor(tpl, exercises[0]);
   const minutes = estimateMinutes(exercises, cardio);
-  return { week, dayIndex, name: tpl.name, focus: tpl.focus, phase, technique, cardio, warmup, exercises, minutes };
+  return { week, dayIndex, name: tpl.name, focus: tpl.focus, phase, technique, cardio, warmup, exercises, minutes, adjust };
 }
 
 function warmupFor(tpl, first) {

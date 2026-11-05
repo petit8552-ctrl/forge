@@ -1,7 +1,8 @@
 import {
   bodyMetrics, coachAdvice, splitFor, buildSession, currentWeek, dateFor, todayIndex, phaseOf, blockOf,
-  PHASES, DAY_NAMES, DEFAULT_DAYS, poolFor, weeklyVolume, e1rm, mondayOf,
+  PHASES, DAY_NAMES, DEFAULT_DAYS, poolFor, weeklyVolume, e1rm, mondayOf, readiness, fmtH,
 } from './engine.js';
+import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { BY_ID, PATTERN_LABEL } from './exercises.js';
 import { photos, videoUrl } from './media.js';
 import * as Sync from './sync.js';
@@ -11,7 +12,7 @@ const KEY = 'forge.v1';
 function load() {
   try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
 }
-const state = Object.assign({ profile: null, history: [], weights: [], drafts: {}, deleted: [] }, load());
+const state = Object.assign({ profile: null, history: [], weights: [], drafts: {}, deleted: [], health: [] }, load());
 function saveLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* stockage indisponible */ } }
 function save() { saveLocal(); Sync.schedule(); }
 const touchProfile = () => { if (state.profile) state.profile.updatedAt = new Date().toISOString(); };
@@ -22,7 +23,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const fmtDate = (d) => d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 const kg = (x) => (x == null ? '—' : `${String(x).replace('.', ',')} kg`);
 const isDone = (w, d) => state.history.some((h) => h.week === w && h.dayIndex === d);
-const sessionFor = (w, d) => buildSession(state.profile, w, d, state.history);
+// La forme du jour (données de la montre) n'ajuste que la séance prévue aujourd'hui.
+const sessionFor = (w, d) => {
+  const isToday = dateFor(state.profile, w, d).toDateString() === new Date().toDateString();
+  return buildSession(state.profile, w, d, state.history, isToday ? readiness(state.health) : null);
+};
+const SHORTCUT_NAME = 'Forge Santé';
+const shortcutUrl = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}`;
 
 const GOALS = {
   masse: ['Prise de muscle', 'Hypertrophie'], seche: ['Sèche', 'Perdre du gras'],
@@ -36,6 +43,7 @@ function route() {
   const [, page = 'today', a, b] = location.hash.split('/');
   if (page === 'login') return renderLogin();
   if (page === 'password') return renderNewPassword();
+  if (page === 'sante' && state.profile) { $tab.hidden = false; return renderHealthGuide(); }
   if (!state.profile) return renderOnboarding();
   $tab.hidden = false;
   $tab.querySelectorAll('a').forEach((x) => x.classList.toggle('on', x.dataset.tab === (page === 'session' ? 'program' : page)));
@@ -177,7 +185,7 @@ function renderToday() {
   const doneThisWeek = p.days.filter((_, d) => isDone(week, d)).length;
   const wd = (new Date().getDay() + 6) % 7;
   const nextIdx = p.days.findIndex((day, d) => day > wd && !isDone(week, d));
-  const m = bodyMetrics(p);
+  const m = bodyMetrics(p, state.health);
   const hello = new Date().getHours() < 18 ? 'Salut' : 'Bonsoir';
 
   let main;
@@ -201,8 +209,10 @@ function renderToday() {
     </div>
     ${Sync.getStatus().configured && !Sync.getStatus().connected ? `<a class="card row between" href="#/profile" style="border-color:rgba(124,196,255,.35)">
       <div><h3>☁ Sauvegarde ton programme</h3><div class="small muted">Crée ton compte pour ne jamais perdre tes séances.</div></div><span class="chev">›</span></a>` : ''}
+    ${formeCard()}
     ${main}
     <h2>Ta journée</h2>
+    ${m.measured ? `<p class="small muted">Calories ajustées sur ta dépense réelle : ${m.active} kcal d’énergie active par jour en moyenne (montre).</p>` : ''}
     <div class="grid2">
       <div class="stat"><b>${m.kcal}</b><span>kcal ${p.goal === 'seche' ? '(déficit)' : p.goal === 'masse' ? '(surplus)' : ''}</span></div>
       <div class="stat"><b>${m.protein} g</b><span>protéines</span></div>
@@ -316,6 +326,7 @@ function renderSession(week, dayIndex) {
       <span class="pill">≈ ${s.minutes} min</span><span class="pill">${s.exercises.length} exercices</span>
       ${locked ? '<span class="pill ok">✓ Séance enregistrée</span>' : ''}
     </div>
+    ${s.adjust ? `<div class="card" style="border-color:${s.adjust.level === 'basse' ? 'var(--danger)' : 'rgba(255,179,71,.5)'}"><h3>${s.adjust.level === 'basse' ? '🔋 Séance allégée' : '🔋 Séance modérée'}</h3><p class="small muted" style="margin:6px 0 0">${esc(s.adjust.text)}</p></div>` : ''}
     ${s.technique ? `<div class="card" style="border-color:rgba(255,179,71,.35)"><div class="row between"><h3>⚡ Technique de la semaine : ${s.technique.name}</h3></div><p class="small muted" style="margin:6px 0 0">${s.technique.detail}</p></div>` : ''}
     <div class="card"><h3>Échauffement · 8 min</h3><ul class="clean small muted" style="margin-top:8px">${s.warmup.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>
     ${s.exercises.map((e, i) => exerciseCard(e, i, exData(e.slot), locked)).join('')}
@@ -478,7 +489,7 @@ function renderProgress() {
     if (!records[e.id] || v > records[e.id].v) records[e.id] = { v, w: s.w, r: s.r, name: e.name };
   }
   const top = Object.values(records).sort((a, b) => b.v - a.v).slice(0, 8);
-  const m = bodyMetrics(p);
+  const m = bodyMetrics(p, state.health);
 
   $app.innerHTML = `
     <div class="eyebrow">Progrès</div><h1>Ton évolution</h1>
@@ -535,7 +546,7 @@ function weightChart() {
 function renderProfile() {
   const p = state.profile;
   if (location.hash === '#/profile/edit') return renderOnboarding(p);
-  const m = bodyMetrics(p);
+  const m = bodyMetrics(p, state.health);
   $app.innerHTML = `
     <div class="eyebrow">Profil</div><h1>${esc(p.name) || 'Mon profil'}</h1>
     <div class="card">
@@ -558,6 +569,8 @@ function renderProfile() {
     </div>
     <h2>Compte et sauvegarde</h2>
     ${accountCard()}
+    <h2>Apple Santé</h2>
+    <a class="card row between" href="#/sante"><div><h3>❤ Montre et Apple Santé</h3><div class="small muted">${state.health.length ? `Dernières données reçues le ${new Date(state.health.at(-1).day).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}` : 'Relie ton bracelet via l’app Raccourcis'}</div></div><span class="chev">›</span></a>
     <h2>Données</h2>
     <div class="card">
       <p class="small muted">${Sync.getStatus().connected ? 'Effacer ne touche que ce téléphone : tes données restent dans ton compte.' : 'Sans compte, tout est enregistré uniquement sur ce téléphone.'}</p>
@@ -569,7 +582,7 @@ function renderProfile() {
     if (!confirm('Effacer le profil, l’historique et les pesées de ce téléphone ?')) return;
     await Sync.signOut().catch(() => {});
     try { localStorage.removeItem(KEY); } catch { /* rien */ }
-    Object.assign(state, { profile: null, history: [], weights: [], drafts: {}, deleted: [] });
+    Object.assign(state, { profile: null, history: [], weights: [], drafts: {}, deleted: [], health: [], healthToken: null });
     location.hash = ''; route();
   };
   bindAccount();
@@ -577,6 +590,97 @@ function renderProfile() {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'forge-sauvegarde.json'; a.click();
   };
+}
+
+// ---------- Apple Santé ----------
+// Une pesée reçue de la balance (via Apple Santé) alimente la courbe et le profil, sans saisie.
+function applyHealthWeight() {
+  const row = [...state.health].reverse().find((r) => r.weight);
+  if (!row || !state.profile) return;
+  if (state.weights.some((w) => w.date.slice(0, 10) === row.day)) return;
+  const kgv = Math.round(Number(row.weight) * 10) / 10;
+  state.weights.push({ date: `${row.day}T06:00:00.000Z`, kg: kgv });
+  state.weights.sort((a, b) => a.date.localeCompare(b.date));
+  if (state.weights.at(-1).kg === kgv) { state.profile.weight = kgv; touchProfile(); }
+  save();
+}
+
+function formeCard() {
+  if (!Sync.getStatus().connected) return '';
+  if (!state.health.length) {
+    return `<a class="card row between" href="#/sante" style="border-color:rgba(248,113,113,.35)"><div><h3>❤ Relie ta montre</h3><div class="small muted">Forge adaptera tes séances à ton sommeil et à ta récupération.</div></div><span class="chev">›</span></a>`;
+  }
+  const r = readiness(state.health);
+  const refresh = `<a class="btn ghost sm" href="${shortcutUrl}">↻ Mettre à jour</a>`;
+  if (!r) {
+    return `<div class="card"><div class="row between"><h3>❤ Forme du jour</h3>${refresh}</div><p class="small muted" style="margin:8px 0 0">Pas encore de données aujourd’hui. Le raccourci les envoie chaque matin ; touche « Mettre à jour » pour l’envoyer maintenant.</p></div>`;
+  }
+  const L = r.last;
+  const pill = { bonne: '<span class="pill ok">Bonne forme</span>', moyenne: '<span class="pill warn">Forme moyenne</span>', basse: '<span class="pill" style="color:var(--danger);border-color:rgba(248,113,113,.4)">Récupération basse</span>' }[r.level] || '';
+  const msg = r.level === 'bonne' ? 'Feu vert : séance complète, vise le haut de tes fourchettes.'
+    : r.level === 'moyenne' ? 'Séance maintenue, avec un peu plus de marge sur les exercices principaux.'
+      : r.level === 'basse' ? 'Séance du jour allégée automatiquement. Dors tôt ce soir.'
+        : 'Ajoute le bracelet (sommeil, cœur) pour obtenir ta note de forme.';
+  const stat = (v, label) => `<div class="stat"><b>${v}</b><span>${label}</span></div>`;
+  return `<div class="card">
+    <div class="row between"><h3>❤ Forme du jour</h3>${pill || refresh}</div>
+    <div class="grid2" style="margin:10px 0">
+      ${stat(L.sleep_min ? fmtH(L.sleep_min) : '—', 'sommeil')}
+      ${stat(L.resting_hr ? `${Math.round(L.resting_hr)} bpm` : '—', 'cœur au repos')}
+      ${stat(L.hrv ? `${Math.round(L.hrv)} ms` : '—', 'variabilité (VFC)')}
+      ${stat(L.steps ? L.steps.toLocaleString('fr-FR') : '—', 'pas (24 h)')}
+    </div>
+    <p class="small muted" style="margin:0">${esc(msg)}${r.reasons.length ? ` <span style="color:var(--text)">${esc(r.reasons.join(', '))}.</span>` : ''}</p>
+    ${pill ? `<div style="margin-top:10px">${refresh}</div>` : ''}
+  </div>`;
+}
+
+function renderHealthGuide() {
+  const st = Sync.getStatus();
+  const endpoint = `${SUPABASE_URL}/rest/v1/rpc/import_health`;
+  const copyRow = (label, value, id) => `<div style="margin:8px 0"><div class="small muted">${label}</div>
+    <div class="row"><code id="${id}" style="flex:1;min-width:0;overflow-wrap:anywhere;background:var(--surface-2);border-radius:10px;padding:8px 10px;font-size:12px">${esc(value)}</code>
+    <button class="btn ghost sm" data-copy="${id}">Copier</button></div></div>`;
+  const step = (n, title, body) => `<div class="card"><div class="row" style="align-items:flex-start"><div class="ex-num">${n}</div><div style="min-width:0;flex:1"><h3>${title}</h3><div class="small muted" style="margin-top:6px">${body}</div></div></div></div>`;
+  const find = (type, how) => `<b>Rechercher des échantillons de santé</b> : type <b>${type}</b>, filtre <i>Date de début</i> · <i>dans les derniers</i> · <b>1 jour</b>${how}`;
+
+  $app.innerHTML = `<a class="small muted" href="#/profile">‹ Profil</a>
+    <div class="eyebrow" style="margin-top:10px">Apple Santé</div><h1>Relier ta montre à Forge</h1>
+    <p class="muted small">Chaque matin, un raccourci de ton iPhone lit Apple Santé (où Mi Fitness envoie les données du bracelet) et les transmet à Forge. Configuration unique, environ 10 minutes.</p>
+    ${!st.connected ? '<div class="card"><p class="small" style="margin:0">Connecte-toi d’abord à ton compte Forge (Profil › Compte et sauvegarde).</p></div>' : `
+    ${step(1, 'Ton code Forge', `Ce code relie le raccourci à ton compte. Garde-le pour toi.
+      <div id="tokbox" style="margin-top:8px">${state.healthToken ? copyRow('Code Forge', state.healthToken, 'tok') : '<button class="btn primary sm" id="mktoken">Générer mon code</button>'}</div>`)}
+    ${step(2, 'Prépare Mi Fitness', 'Dans Mi Fitness : <b>Profil › Données tierces › Santé</b>, active le partage. Puis dans l’app <b>Santé</b> de l’iPhone : <b>Profil › Apps › Mi Fitness</b>, autorise tout. (Sans bracelet, l’iPhone envoie déjà pas et calories.)')}
+    ${step(3, 'Crée le raccourci « Forge Santé »', `Ouvre l’app <b>Raccourcis</b> › <b>+</b> › nomme-le <b>Forge Santé</b>. Ajoute ces actions dans l’ordre (cherche-les par leur nom) :
+      <ol style="padding-left:18px;margin:8px 0 0">
+        <li>${find('Pas', '')}, puis <b>Calculer des statistiques</b> : <b>Somme</b>, puis <b>Définir la variable</b> <b>Pas</b>.</li>
+        <li>${find('Énergie active', '')}, puis <b>Calculer des statistiques</b> : <b>Somme</b>, puis <b>Définir la variable</b> <b>Calories</b>.</li>
+        <li>${find('Fréquence cardiaque au repos', ', trier par <i>Date de début</i>, <i>le plus récent d’abord</i>, limite <b>1</b>')}, puis <b>Obtenir les détails des échantillons de santé</b> : <b>Valeur</b>, puis <b>Définir la variable</b> <b>Coeur</b>.</li>
+        <li>Même chose avec le type <b>Variabilité de la fréquence cardiaque</b> › variable <b>VFC</b>.</li>
+        <li>${find('Analyse du sommeil', ', ajoute le filtre <i>Valeur</i> · <i>n’est pas</i> · <b>Au lit</b>, et un autre <i>n’est pas</i> · <b>Éveillé</b>')}, puis <b>Obtenir les détails des échantillons de santé</b> : <b>Durée</b>, puis <b>Calculer des statistiques</b> : <b>Somme</b>, puis <b>Définir la variable</b> <b>Sommeil</b>.</li>
+        <li>Même chose qu’au 3 avec le type <b>Poids</b> (masse corporelle) › variable <b>Poids</b>.</li>
+        <li><b>Obtenir le contenu de l’URL</b> avec l’adresse ci-dessous. Touche <i>Afficher plus</i> : méthode <b>POST</b> ; en-têtes <b>apikey</b> (valeur ci-dessous) et <b>Content-Type</b> = <b>application/json</b> ; corps de la requête <b>JSON</b> avec ces champs de type <i>Texte</i> : <b>p_token</b> = ton code Forge, <b>p_steps</b> = Pas, <b>p_active_kcal</b> = Calories, <b>p_resting_hr</b> = Coeur, <b>p_hrv</b> = VFC, <b>p_sleep</b> = Sommeil, <b>p_weight</b> = Poids.</li>
+        <li><b>Afficher le résultat</b> (pour le premier essai : il doit afficher « OK »).</li>
+      </ol>
+      ${copyRow('Adresse (URL)', endpoint, 'url')}
+      ${copyRow('Valeur de l’en-tête apikey', SUPABASE_KEY, 'key')}
+      <p style="margin:8px 0 0">Avant d’avoir le bracelet, les blocs 3 à 5 ne trouvent rien : c’est normal, Forge ignore les valeurs vides.</p>`)}
+    ${step(4, 'Teste-le', `Lance le raccourci une fois : l’iPhone demande l’accès à Santé, accepte tout. Il doit afficher « OK ».
+      <div style="margin-top:8px"><a class="btn primary sm" href="${shortcutUrl}">▶ Lancer Forge Santé</a></div>`)}
+    ${step(5, 'Automatise-le chaque matin', 'Raccourcis › <b>Automatisation</b> › <b>+</b> › <b>Heure de la journée</b> : <b>7:00</b>, chaque jour › choisis <b>Exécuter immédiatement</b> › raccourci <b>Forge Santé</b>. Supprime ensuite l’action « Afficher le résultat » pour qu’il tourne en silence.')}
+    ${step(6, 'C’est en place', `Ouvre Forge : la carte <b>Forme du jour</b> apparaît sur l’accueil. ${state.health.length ? `Dernières données reçues le <b>${new Date(state.health.at(-1).day).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</b>.` : 'Aucune donnée reçue pour l’instant.'}`)}`}`;
+
+  $app.querySelector('#mktoken')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      state.healthToken = await Sync.createHealthToken(); saveLocal(); renderHealthGuide();
+    } catch (err) { e.target.disabled = false; alert(err.message); }
+  });
+  $app.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
+    const text = $app.querySelector('#' + b.dataset.copy).textContent;
+    try { await navigator.clipboard.writeText(text); b.textContent = 'Copié ✓'; } catch { b.textContent = 'Sélectionne le texte'; }
+    setTimeout(() => { b.textContent = 'Copier'; }, 2000);
+  }));
 }
 
 // ---------- Compte ----------
@@ -662,6 +766,7 @@ route();
 Sync.init({
   get: () => state,
   set: (merged) => { Object.assign(state, merged); saveLocal(); },
+  setHealth: (rows) => { state.health = rows; applyHealthWeight(); saveLocal(); },
   changed: () => {
     const [, page = 'today', sub] = location.hash.split('/');
     // On ne redessine jamais un écran en cours de saisie (questionnaire, séance, connexion, champ actif).

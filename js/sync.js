@@ -28,6 +28,8 @@ export async function init(h) {
   }
   host.changed();
   window.addEventListener('online', () => { if (!client) init(host); else if (user) syncNow(); });
+  // Au retour dans l'appli (par exemple après le raccourci Santé), on récupère les nouvelles données.
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && user) syncNow(); });
 }
 
 function friendly(err) {
@@ -68,9 +70,19 @@ export async function updatePassword(password) {
   if (error) throw new Error(friendly(error));
 }
 
+// Code personnel à coller dans le raccourci iPhone (en crée un nouveau, l'ancien cesse de marcher).
+export async function createHealthToken() {
+  if (!client || !user) throw new Error('Connecte-toi d’abord à ton compte Forge.');
+  const { data, error } = await client.rpc('create_health_token');
+  if (error) throw new Error(friendly(error));
+  return data;
+}
+
 export async function signOut() {
   if (client) await client.auth.signOut();
-  user = null; status.lastSync = null; host.changed();
+  user = null; status.lastSync = null;
+  if (host.setHealth) host.setHealth([]);
+  host.changed();
 }
 
 // Appelé à chaque enregistrement local : on regroupe les envois (2 s).
@@ -93,6 +105,10 @@ export async function syncNow() {
     host.set(merged);
     const { error: e2 } = await client.from('user_data').upsert({ user_id: user.id, data: payload(host.get()), updated_at: new Date().toISOString() });
     if (e2) throw e2;
+    // Données Apple Santé des 30 derniers jours (envoyées par le raccourci).
+    const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+    const { data: health, error: e3 } = await client.from('health_daily').select('day,steps,active_kcal,resting_hr,hrv,sleep_min,weight').gte('day', since).order('day');
+    if (!e3 && host.setHealth) host.setHealth(health || []);
     status.lastSync = new Date(); status.pending = false; status.error = null;
   } catch (e) {
     status.error = friendly(e);
