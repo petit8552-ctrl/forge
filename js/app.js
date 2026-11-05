@@ -1,0 +1,571 @@
+import {
+  bodyMetrics, coachAdvice, splitFor, buildSession, currentWeek, dateFor, todayIndex, phaseOf, blockOf,
+  PHASES, DAY_NAMES, DEFAULT_DAYS, poolFor, weeklyVolume, e1rm, mondayOf,
+} from './engine.js';
+import { BY_ID, PATTERN_LABEL } from './exercises.js';
+import { photos, videoUrl } from './media.js';
+
+// ---------- État persistant ----------
+const KEY = 'forge.v1';
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
+}
+const state = Object.assign({ profile: null, history: [], weights: [], drafts: {} }, load());
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* stockage indisponible */ } }
+
+const $app = document.getElementById('app');
+const $tab = document.getElementById('tabbar');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtDate = (d) => d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+const kg = (x) => (x == null ? '—' : `${String(x).replace('.', ',')} kg`);
+const isDone = (w, d) => state.history.some((h) => h.week === w && h.dayIndex === d);
+const sessionFor = (w, d) => buildSession(state.profile, w, d, state.history);
+
+const GOALS = {
+  masse: ['Prise de muscle', 'Hypertrophie'], seche: ['Sèche', 'Perdre du gras'],
+  force: ['Force', 'Charges lourdes'], forme: ['Forme & santé', 'Global, cardio'],
+};
+const LEVELS = { debutant: ['Débutant', '< 6 mois'], intermediaire: ['Intermédiaire', '6 mois – 2 ans'], avance: ['Avancé', '> 2 ans'] };
+const ROLE = { main: 'Principal', sec: 'Secondaire', acc: 'Accessoire' };
+
+// ---------- Routage ----------
+function route() {
+  if (!state.profile) return renderOnboarding();
+  const [, page = 'today', a, b] = location.hash.split('/');
+  $tab.hidden = false;
+  $tab.querySelectorAll('a').forEach((x) => x.classList.toggle('on', x.dataset.tab === (page === 'session' ? 'program' : page)));
+  window.scrollTo(0, 0);
+  if (page === 'program') return renderProgram(a ? +a : currentWeek(state.profile));
+  if (page === 'session') return renderSession(+a, +b);
+  if (page === 'progress') return renderProgress();
+  if (page === 'profile') return renderProfile();
+  return renderToday();
+}
+window.addEventListener('hashchange', route);
+
+// ---------- Onboarding ----------
+function renderOnboarding(existing) {
+  $tab.hidden = true;
+  const p = existing || { name: '', sex: 'h', age: 28, height: 175, weight: 75, level: 'debutant', goal: 'masse', days: DEFAULT_DAYS[3], duration: 60, dailyActivity: 'modere' };
+  const draft = { ...p, days: [...p.days] };
+  const steps = existing ? 1 : 4;
+  let step = 0;
+
+  const chips = (name, opts, val) => `<div class="chips" data-name="${name}">${Object.entries(opts).map(([k, [l, s]]) =>
+    `<button type="button" class="chip ${String(val) === String(k) ? 'on' : ''}" data-val="${k}">${l}${s ? `<small>${s}</small>` : ''}</button>`).join('')}</div>`;
+
+  const s1 = `
+    <label class="field"><span>Prénom</span><input type="text" name="name" value="${esc(draft.name)}" placeholder="Ton prénom" autocomplete="given-name"></label>
+    <label class="field"><span>Sexe</span>${chips('sex', { h: ['Homme'], f: ['Femme'] }, draft.sex)}</label>
+    <div class="grid3">
+      <label class="field"><span>Âge</span><input type="number" name="age" inputmode="numeric" min="14" max="90" value="${draft.age}"></label>
+      <label class="field"><span>Taille (cm)</span><input type="number" name="height" inputmode="numeric" min="130" max="230" value="${draft.height}"></label>
+      <label class="field"><span>Poids (kg)</span><input type="number" name="weight" inputmode="decimal" step="0.1" min="35" max="250" value="${draft.weight}"></label>
+    </div>`;
+  const s2 = `
+    <label class="field"><span>Objectif principal</span>${chips('goal', GOALS, draft.goal)}</label>
+    <label class="field"><span>Niveau en musculation</span>${chips('level', LEVELS, draft.level)}</label>
+    <label class="field"><span>Activité hors salle</span>${chips('dailyActivity', { sedentaire: ['Sédentaire', 'Bureau'], modere: ['Modérée', 'Marche'], actif: ['Active', 'Métier physique'] }, draft.dailyActivity)}</label>`;
+  const s3 = `
+    <label class="field"><span>Séances par semaine</span>${chips('count', { 2: ['2'], 3: ['3'], 4: ['4'], 5: ['5'], 6: ['6'] }, draft.days.length)}</label>
+    <label class="field"><span>Jours à la salle</span><div class="chips days" data-name="days">${DAY_NAMES.map((d, i) =>
+      `<button type="button" class="chip ${draft.days.includes(i) ? 'on' : ''}" data-val="${i}">${d}</button>`).join('')}</div></label>
+    <label class="field"><span>Durée d’une séance</span>${chips('duration', { 45: ['45 min'], 60: ['1 h'], 75: ['1 h 15'], 90: ['1 h 30'] }, draft.duration)}</label>
+    <p class="small muted" id="splitInfo"></p>`;
+
+  const stepsHtml = existing ? [s1 + s2 + s3] : [s1, s2, s3, '<div id="summary"></div>'];
+  $app.innerHTML = `
+    <div class="onb">
+      ${existing ? '<div class="eyebrow">Profil</div><h1>Modifier mes infos</h1>' : '<div class="eyebrow">Forge</div><h1>Ton coach muscu personnel</h1><p class="muted">4 questions pour construire un programme qui te ressemble et se renouvelle chaque semaine.</p>'}
+      ${existing ? '' : `<div class="progress-dots">${stepsHtml.map(() => '<i></i>').join('')}</div>`}
+      <form id="onb">${stepsHtml.map((h, i) => `<section class="onb-step" data-step="${i}">${h}</section>`).join('')}
+        <div class="sticky-actions row">
+          ${existing ? '<a class="btn ghost" href="#/profile">Annuler</a>' : '<button type="button" class="btn ghost" id="back">Retour</button>'}
+          <button type="submit" class="btn primary" style="flex:1" id="next"></button>
+        </div>
+      </form>
+    </div>`;
+
+  const form = $app.querySelector('#onb');
+  const readInputs = () => {
+    form.querySelectorAll('input[name]').forEach((i) => { draft[i.name] = i.type === 'number' ? parseFloat(i.value) : i.value.trim(); });
+  };
+  const refreshSplit = () => {
+    const el = form.querySelector('#splitInfo');
+    if (el) el.textContent = draft.days.length >= 2 ? `Programme : ${splitFor(draft.days.length).name}.` : 'Choisis au moins 2 jours.';
+  };
+  const show = () => {
+    form.querySelectorAll('.onb-step').forEach((s) => s.classList.toggle('on', +s.dataset.step === step || !!existing));
+    $app.querySelectorAll('.progress-dots i').forEach((d, i) => d.classList.toggle('on', i <= step));
+    const back = form.querySelector('#back'); if (back) back.style.visibility = step ? 'visible' : 'hidden';
+    form.querySelector('#next').textContent = existing ? 'Enregistrer' : step === steps - 1 ? 'Lancer mon programme' : 'Continuer';
+    if (!existing && step === 3) renderSummary();
+    refreshSplit();
+  };
+  const renderSummary = () => {
+    const m = bodyMetrics(draft);
+    const split = splitFor(draft.days.length);
+    form.querySelector('#summary').innerHTML = `
+      <div class="card hero">
+        <div class="eyebrow">Ton bilan</div>
+        <h2 style="margin-top:6px">${esc(draft.name) || 'Ton'} programme : ${split.name}</h2>
+        <div class="grid2" style="margin-top:12px">
+          <div class="stat"><b>${m.bmi.toFixed(1).replace('.', ',')}</b><span>IMC · ${m.bmiLabel}</span></div>
+          <div class="stat"><b>${m.kcal}</b><span>kcal / jour</span></div>
+          <div class="stat"><b>${m.protein} g</b><span>protéines / jour</span></div>
+          <div class="stat"><b>${String(m.water).replace('.', ',')} L</b><span>eau / jour</span></div>
+        </div>
+      </div>
+      <div class="card"><h3>Comment ça marche</h3>
+        <div class="tip">Cycles de 4 semaines : accumulation, progression, intensification, puis récupération.</div>
+        <div class="tip">Les exercices principaux changent à chaque cycle, les accessoires chaque semaine.</div>
+        <div class="tip">Les charges sont proposées à partir de ton poids, puis ajustées selon ce que tu notes.</div>
+      </div>`;
+  };
+
+  form.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip'); if (!chip) return;
+    const group = chip.parentElement.dataset.name; const val = chip.dataset.val;
+    if (group === 'days') {
+      const i = +val;
+      draft.days = draft.days.includes(i) ? draft.days.filter((x) => x !== i) : [...draft.days, i].sort();
+      if (draft.days.length > 6) draft.days = draft.days.filter((x) => x !== i);
+      chip.classList.toggle('on', draft.days.includes(i));
+      form.querySelectorAll('[data-name=count] .chip').forEach((c) => c.classList.toggle('on', +c.dataset.val === draft.days.length));
+    } else if (group === 'count') {
+      draft.days = [...DEFAULT_DAYS[+val]];
+      chip.parentElement.querySelectorAll('.chip').forEach((c) => c.classList.toggle('on', c === chip));
+      form.querySelectorAll('[data-name=days] .chip').forEach((c) => c.classList.toggle('on', draft.days.includes(+c.dataset.val)));
+    } else {
+      draft[group] = group === 'duration' ? +val : val;
+      chip.parentElement.querySelectorAll('.chip').forEach((c) => c.classList.toggle('on', c === chip));
+    }
+    refreshSplit();
+  });
+  form.querySelector('#back')?.addEventListener('click', () => { readInputs(); step = Math.max(0, step - 1); show(); });
+  form.addEventListener('submit', (e) => {
+    e.preventDefault(); readInputs();
+    if (!(draft.age > 0 && draft.height > 100 && draft.weight > 30)) return alert('Vérifie l’âge, la taille et le poids.');
+    if (draft.days.length < 2) return alert('Choisis au moins 2 jours d’entraînement.');
+    if (!existing && step < steps - 1) { step++; show(); return; }
+    if (existing) {
+      // Changer de split invalide les variantes choisies à la main.
+      if (existing.days.length !== draft.days.length) draft.swaps = {};
+      if (existing.weight !== draft.weight) state.weights.push({ date: new Date().toISOString(), kg: draft.weight });
+      state.profile = draft;
+    } else {
+      state.profile = { ...draft, startDate: new Date().toISOString(), swaps: {} };
+      state.weights.push({ date: new Date().toISOString(), kg: draft.weight });
+    }
+    save(); location.hash = existing ? '#/profile' : '#/today'; route();
+  });
+  show();
+}
+
+// ---------- Aujourd'hui ----------
+function renderToday() {
+  const p = state.profile;
+  const week = currentWeek(p);
+  const phase = phaseOf(week);
+  const ti = todayIndex(p);
+  const split = splitFor(p.days.length);
+  const doneThisWeek = p.days.filter((_, d) => isDone(week, d)).length;
+  const wd = (new Date().getDay() + 6) % 7;
+  const nextIdx = p.days.findIndex((day, d) => day > wd && !isDone(week, d));
+  const m = bodyMetrics(p);
+  const hello = new Date().getHours() < 18 ? 'Salut' : 'Bonsoir';
+
+  let main;
+  if (ti >= 0) {
+    const s = sessionFor(week, ti);
+    main = sessionCard(s, isDone(week, ti) ? 'Séance terminée, bravo !' : 'Séance du jour', true);
+  } else {
+    const s = nextIdx >= 0 ? sessionFor(week, nextIdx) : null;
+    main = `<div class="card"><div class="eyebrow">Jour de repos</div><h2 style="margin:6px 0">Récupère, ça fait partie du programme</h2>
+      <p class="muted small">Marche 30 min, étire-toi 10 min, dors bien. ${s ? `Prochaine séance : <b>${s.name}</b>, ${fmtDate(dateFor(p, week, nextIdx))}.` : 'Semaine bouclée, la suivante est déjà prête.'}</p>
+      ${s ? `<a class="btn ghost sm" href="#/session/${week}/${nextIdx}">Voir la prochaine séance</a>` : ''}</div>`;
+  }
+
+  $app.innerHTML = `
+    <div class="eyebrow">${fmtDate(new Date())}</div>
+    <h1>${hello}${p.name ? ' ' + esc(p.name) : ''} 👋</h1>
+    <div class="row wrap" style="margin:8px 0 14px">
+      <span class="pill accent">Semaine ${week} · ${phase.name}</span>
+      <span class="pill">Cycle ${blockOf(week) + 1}</span>
+      <span class="pill">${doneThisWeek}/${p.days.length} séances</span>
+    </div>
+    ${main}
+    <h2>Ta journée</h2>
+    <div class="grid2">
+      <div class="stat"><b>${m.kcal}</b><span>kcal ${p.goal === 'seche' ? '(déficit)' : p.goal === 'masse' ? '(surplus)' : ''}</span></div>
+      <div class="stat"><b>${m.protein} g</b><span>protéines</span></div>
+      <div class="stat"><b>${m.carbs} g</b><span>glucides</span></div>
+      <div class="stat"><b>${String(m.water).replace('.', ',')} L</b><span>eau</span></div>
+    </div>
+    <h2>Cette semaine · ${split.name}</h2>
+    <p class="muted small">${phase.desc}</p>
+    ${weekList(week)}
+    <h2>Conseils du coach</h2>
+    <div class="card">${coachAdvice(p).map((t) => `<div class="tip">${esc(t)}</div>`).join('')}</div>`;
+}
+
+function sessionCard(s, label, big) {
+  const done = isDone(s.week, s.dayIndex);
+  return `<div class="card ${big ? 'hero' : ''}">
+    <div class="row between"><div class="eyebrow">${label}</div>${done ? '<span class="pill ok">✓ Faite</span>' : `<span class="pill">≈ ${s.minutes} min</span>`}</div>
+    <h2 style="margin:6px 0 2px">${s.name}</h2>
+    <p class="muted small">${s.focus}</p>
+    <ul class="clean small" style="margin:10px 0 12px">${s.exercises.map((e) => `<li>${esc(e.name)} <span class="muted">· ${e.sets}×${e.repsMin === e.repsMax ? e.repsMin : e.repsMin + '–' + e.repsMax}</span></li>`).join('')}</ul>
+    <div class="row wrap" style="margin-bottom:12px">
+      ${s.technique ? `<span class="pill warn">⚡ ${s.technique.name}</span>` : ''}
+      ${s.cardio ? `<span class="pill blue">♥ ${s.cardio.name}</span>` : ''}
+    </div>
+    <a class="btn ${done ? 'ghost' : 'primary'} block" href="#/session/${s.week}/${s.dayIndex}">${done ? 'Revoir la séance' : 'Commencer'}</a>
+  </div>`;
+}
+
+function weekList(week) {
+  const p = state.profile;
+  const todayKey = new Date().toDateString();
+  return p.days.map((_, d) => {
+    const s = sessionFor(week, d);
+    const date = dateFor(p, week, d);
+    const done = isDone(week, d);
+    return `<a class="card day ${date.toDateString() === todayKey ? 'today' : ''}" href="#/session/${week}/${d}">
+      <div class="date"><span>${DAY_NAMES[p.days[d]]}</span><b>${date.getDate()}</b></div>
+      <div class="grow"><h3>${s.name}</h3><div class="small muted">${s.focus} · ${s.exercises.length} exercices · ≈ ${s.minutes} min</div></div>
+      ${done ? '<span class="pill ok">✓</span>' : '<span class="chev">›</span>'}
+    </a>`;
+  }).join('');
+}
+
+// ---------- Programme ----------
+function renderProgram(week) {
+  const p = state.profile;
+  const cur = currentWeek(p);
+  const phase = phaseOf(week);
+  const pi = (week - 1) % 4;
+  const vol = weeklyVolume(p, week);
+  const monday = mondayOf(p.startDate); monday.setDate(monday.getDate() + (week - 1) * 7);
+  const muscles = ['pectoraux', 'dos', 'épaules', 'quadriceps', 'ischios', 'fessiers', 'biceps', 'triceps', 'mollets', 'abdos'];
+  const maxV = Math.max(...muscles.map((x) => vol[x] || 0), 1);
+
+  $app.innerHTML = `
+    <div class="eyebrow">Programme · ${splitFor(p.days.length).name}</div>
+    <div class="weeknav">
+      <button id="prev" ${week <= 1 ? 'disabled' : ''} aria-label="Semaine précédente">‹</button>
+      <div class="center"><h1 style="margin:0">Semaine ${week}</h1><div class="small muted">du ${monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} ${week === cur ? '· en cours' : ''}</div></div>
+      <button id="nextw" aria-label="Semaine suivante">›</button>
+    </div>
+    <div class="card">
+      <div class="row between"><h3>Cycle ${blockOf(week) + 1} · ${phase.name}</h3><span class="pill accent">${phase.short}</span></div>
+      <div class="phasebar">${PHASES.map((_, i) => `<i class="${i === pi ? 'on' : i < pi ? 'past' : ''}"></i>`).join('')}</div>
+      <p class="small muted" style="margin-top:8px">${phase.desc}</p>
+    </div>
+    ${weekList(week)}
+    <h2>Volume de la semaine</h2>
+    <div class="card">
+      <p class="small muted">Séries directes par muscle (une série sur un muscle secondaire compte pour ½). Repère scientifique : 10 à 20 séries par muscle et par semaine.</p>
+      ${muscles.map((x) => {
+        const v = vol[x] || 0;
+        return `<div class="vol"><span>${x[0].toUpperCase() + x.slice(1)}</span><div class="bar"><i class="${v < 8 && phase.key !== 'deload' ? 'low' : ''}" style="width:${(v / maxV) * 100}%"></i></div><b>${Math.round(v)}</b></div>`;
+      }).join('')}
+    </div>`;
+  $app.querySelector('#prev').onclick = () => { location.hash = `#/program/${week - 1}`; };
+  $app.querySelector('#nextw').onclick = () => { location.hash = `#/program/${week + 1}`; };
+}
+
+// ---------- Séance ----------
+function draftFor(s) {
+  const key = `${s.week}|${s.dayIndex}`;
+  const logged = state.history.find((h) => h.week === s.week && h.dayIndex === s.dayIndex);
+  if (logged) return { key, data: logged, locked: true };
+  let d = state.drafts[key];
+  if (!d) d = state.drafts[key] = { exercises: {} };
+  for (const e of s.exercises) {
+    const cur = d.exercises[e.slot];
+    if (!cur || cur.id !== e.id) {
+      d.exercises[e.slot] = { id: e.id, sets: Array.from({ length: e.sets }, () => ({ w: e.load ?? '', r: '', done: false })) };
+    } else if (cur.sets.length !== e.sets) {
+      cur.sets = Array.from({ length: e.sets }, (_, i) => cur.sets[i] || { w: e.load ?? '', r: '', done: false });
+    }
+  }
+  return { key, data: d, locked: false };
+}
+
+function renderSession(week, dayIndex) {
+  const p = state.profile;
+  if (!(week >= 1) || !(dayIndex >= 0 && dayIndex < p.days.length)) { location.hash = '#/today'; return; }
+  const s = sessionFor(week, dayIndex);
+  const { key, data, locked } = draftFor(s);
+  const exData = (slot) => (locked ? data.exercises.find((x) => x.slot === slot) : data.exercises[slot]);
+  const date = dateFor(p, week, dayIndex);
+
+  $app.innerHTML = `
+    <a class="small muted" href="#/program/${week}">‹ Semaine ${week}</a>
+    <div class="eyebrow" style="margin-top:10px">${fmtDate(date)} · ${s.phase.name}</div>
+    <h1>${s.name}</h1>
+    <div class="row wrap" style="margin:8px 0 14px">
+      <span class="pill">≈ ${s.minutes} min</span><span class="pill">${s.exercises.length} exercices</span>
+      ${locked ? '<span class="pill ok">✓ Séance enregistrée</span>' : ''}
+    </div>
+    ${s.technique ? `<div class="card" style="border-color:rgba(255,179,71,.35)"><div class="row between"><h3>⚡ Technique de la semaine : ${s.technique.name}</h3></div><p class="small muted" style="margin:6px 0 0">${s.technique.detail}</p></div>` : ''}
+    <div class="card"><h3>Échauffement · 8 min</h3><ul class="clean small muted" style="margin-top:8px">${s.warmup.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>
+    ${s.exercises.map((e, i) => exerciseCard(e, i, exData(e.slot), locked)).join('')}
+    ${s.cardio ? `<div class="card" style="border-color:rgba(124,196,255,.35)"><h3>♥ Finisher cardio : ${s.cardio.name}</h3><p class="small muted" style="margin:6px 0 0">${s.cardio.detail}</p></div>` : ''}
+    <div class="card"><h3>Retour au calme · 5 min</h3><p class="small muted" style="margin:6px 0 0">Étirements légers des muscles travaillés, respiration lente. Bois de l’eau et prends un repas avec ${Math.round(p.weight * 0.4)} g de protéines dans les 2 h.</p></div>
+    ${locked ? `<button class="btn ghost block" id="reopen">Modifier la séance</button>`
+      : `<div class="sticky-actions"><button class="btn primary block" id="finish">Terminer la séance</button></div>`}`;
+
+  if (locked) {
+    $app.querySelector('#reopen').onclick = () => {
+      state.history = state.history.filter((h) => h !== data);
+      state.drafts[key] = { exercises: Object.fromEntries(data.exercises.map((x) => [x.slot, { id: x.id, sets: x.sets }])) };
+      save(); route();
+    };
+    return;
+  }
+
+  $app.querySelectorAll('.set input').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const { slot, set, field } = inp.dataset;
+      data.exercises[slot].sets[set][field] = inp.value === '' ? '' : parseFloat(inp.value.replace(',', '.'));
+      save();
+    });
+  });
+  $app.querySelectorAll('.set .check').forEach((btn) => {
+    btn.onclick = () => {
+      const { slot, set } = btn.dataset;
+      const ex = s.exercises.find((x) => x.slot === +slot);
+      const st = data.exercises[slot].sets[set];
+      if (!st.done && (st.r === '' || st.r == null)) {
+        st.r = ex.repsMax;
+        btn.closest('.set').querySelector('[data-field=r]').value = st.r;
+      }
+      st.done = !st.done;
+      btn.closest('.set').classList.toggle('done', st.done);
+      save();
+      if (st.done) startTimer(ex.rest, ex.name);
+    };
+  });
+  $app.querySelectorAll('[data-swap]').forEach((btn) => {
+    btn.onclick = () => {
+      const slot = +btn.dataset.swap;
+      const ex = s.exercises.find((x) => x.slot === slot);
+      const used = new Set(s.exercises.map((x) => x.id));
+      const pool = poolFor(ex.pattern, p, ex.role);
+      const start = pool.findIndex((x) => x.id === ex.id);
+      let next = pool[(start + 1) % pool.length];
+      for (let k = 1; k <= pool.length; k++) {
+        const c = pool[(start + k) % pool.length];
+        if (!used.has(c.id)) { next = c; break; }
+      }
+      p.swaps = p.swaps || {};
+      p.swaps[`${week}|${dayIndex}|${slot}`] = next.id;
+      delete data.exercises[slot];
+      save(); route();
+    };
+  });
+  $app.querySelector('#finish').onclick = () => {
+    const exercises = s.exercises.map((e) => ({
+      slot: e.slot, id: e.id, name: e.name,
+      sets: data.exercises[e.slot].sets.map((x) => ({ w: +x.w || 0, r: +x.r || 0, done: !!x.done })),
+    }));
+    const doneSets = exercises.reduce((n, e) => n + e.sets.filter((x) => x.done).length, 0);
+    if (!doneSets && !confirm('Aucune série cochée. Enregistrer quand même ?')) return;
+    state.history.push({ week, dayIndex, name: s.name, date: new Date().toISOString(), exercises });
+    delete state.drafts[key];
+    stopTimer(); save();
+    location.hash = '#/today';
+  };
+}
+
+function exerciseCard(e, i, d, locked) {
+  const range = e.repsMin === e.repsMax ? `${e.repsMin}` : `${e.repsMin}–${e.repsMax}`;
+  const unit = e.timed ? 's' : 'reps';
+  const sets = d ? d.sets : [];
+  return `<div class="card ex ${e.role === 'main' ? 'main' : ''}">
+    <div class="ex-head">
+      <div class="row" style="align-items:flex-start"><div class="ex-num">${i + 1}</div>
+        <div><h3>${esc(e.name)}</h3><div class="small muted">${ROLE[e.role]} · ${PATTERN_LABEL[e.pattern]}</div></div></div>
+      ${!locked && e.poolSize > 1 ? `<button class="btn ghost sm" data-swap="${e.slot}" title="Remplacer par un exercice équivalent">⇄ Variante</button>` : ''}
+    </div>
+    <div class="ex-meta">
+      <span class="pill accent">${e.sets} × ${range} ${unit}</span>
+      <span class="pill">RIR ${e.rir}</span>
+      <span class="pill">Repos ${e.rest >= 120 ? (e.rest / 60).toString().replace('.', ',') + ' min' : e.rest + ' s'}</span>
+      ${e.load ? `<span class="pill">${kg(e.load)}${e.unit === 'halteres' ? ' / haltère' : ''}</span>` : ''}
+    </div>
+    ${mediaBlock(e)}
+    <div class="ex-cue">${esc(e.cue)}${e.loadNote ? `<br><span style="color:var(--text)">${esc(e.loadNote)}</span>` : ''}</div>
+    <div class="sets">
+      <div class="set-head"><span>#</span><span>kg</span><span>${unit}</span><span></span></div>
+      ${sets.map((st, k) => `<div class="set ${st.done ? 'done' : ''}">
+        <span class="n">${k + 1}</span>
+        <input type="number" inputmode="decimal" step="0.5" placeholder="${e.load ?? '—'}" value="${st.w ?? ''}" data-slot="${e.slot}" data-set="${k}" data-field="w" ${locked ? 'disabled' : ''} aria-label="Charge série ${k + 1}">
+        <input type="number" inputmode="numeric" placeholder="${range}" value="${st.r ?? ''}" data-slot="${e.slot}" data-set="${k}" data-field="r" ${locked ? 'disabled' : ''} aria-label="Répétitions série ${k + 1}">
+        <button class="check" data-slot="${e.slot}" data-set="${k}" ${locked ? 'disabled' : ''} aria-label="Valider la série">✓</button>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+// Photos départ / arrivée en fondu alterné : on voit le mouvement et la machine.
+function mediaBlock(e) {
+  const ph = photos(e.id);
+  const video = `<a class="btn ghost sm" href="${videoUrl(e.name)}" target="_blank" rel="noopener">▶ Vidéo</a>`;
+  if (!ph) return `<div class="ex-media-actions">${video}</div>`;
+  return `<figure class="ex-media" data-media>
+      <img src="${ph.start}" alt="${esc(e.name)}, position de départ" loading="lazy" decoding="async">
+      <img src="${ph.end}" alt="${esc(e.name)}, position d’arrivée" loading="lazy" decoding="async" class="end">
+      <figcaption><span class="lbl">Départ ⇄ arrivée</span>${video}</figcaption>
+    </figure>${ph.note ? `<p class="small muted" style="margin:6px 0 0">${esc(ph.note)}</p>` : ''}`;
+}
+// Toucher la photo met l'animation en pause sur la position affichée.
+document.addEventListener('click', (ev) => {
+  const fig = ev.target.closest('[data-media]');
+  if (fig && !ev.target.closest('a')) fig.classList.toggle('paused');
+});
+
+// ---------- Minuteur de repos ----------
+const $timer = document.getElementById('timer');
+let timerId = null;
+function startTimer(seconds, label) {
+  stopTimer();
+  let left = seconds;
+  const end = Date.now() + seconds * 1000;
+  $timer.hidden = false;
+  const paint = () => {
+    const m = Math.floor(left / 60); const sec = String(left % 60).padStart(2, '0');
+    $timer.innerHTML = `<div class="t">${m}:${sec}</div><div class="grow small"><b>Repos</b><div class="muted">${esc(label)}</div></div>
+      <button class="btn sm ghost" id="tplus">+30 s</button><button class="btn sm primary" id="tskip">Passer</button>`;
+    $timer.querySelector('#tplus').onclick = () => { startTimer(left + 30, label); };
+    $timer.querySelector('#tskip').onclick = stopTimer;
+  };
+  paint();
+  timerId = setInterval(() => {
+    left = Math.max(0, Math.round((end - Date.now()) / 1000));
+    if (left <= 0) { stopTimer(); if (navigator.vibrate) navigator.vibrate([200, 100, 200]); return; }
+    paint();
+  }, 1000);
+}
+function stopTimer() { clearInterval(timerId); timerId = null; $timer.hidden = true; }
+
+// ---------- Progrès ----------
+function renderProgress() {
+  const p = state.profile;
+  const week = currentWeek(p);
+  const total = state.history.length;
+  const tonnage = state.history.reduce((t, h) => t + h.exercises.reduce((a, e) => a + e.sets.filter((s) => s.done).reduce((b, s) => b + s.w * s.r, 0), 0), 0);
+  // Régularité : semaines consécutives (jusqu'à la semaine en cours) avec au moins une séance.
+  let streak = 0;
+  for (let w = week; w >= 1; w--) {
+    if (state.history.some((h) => h.week === w)) streak++;
+    else if (w !== week) break;
+  }
+  const records = {};
+  for (const h of state.history) for (const e of h.exercises) for (const s of e.sets) {
+    if (!s.done || !s.w || !s.r) continue;
+    const v = e1rm(s.w, s.r);
+    if (!records[e.id] || v > records[e.id].v) records[e.id] = { v, w: s.w, r: s.r, name: e.name };
+  }
+  const top = Object.values(records).sort((a, b) => b.v - a.v).slice(0, 8);
+  const m = bodyMetrics(p);
+
+  $app.innerHTML = `
+    <div class="eyebrow">Progrès</div><h1>Ton évolution</h1>
+    <div class="grid3" style="margin:14px 0">
+      <div class="stat"><b>${total}</b><span>séances</span></div>
+      <div class="stat"><b>${streak}</b><span>sem. d’affilée</span></div>
+      <div class="stat"><b>${(tonnage / 1000).toFixed(1).replace('.', ',')} t</b><span>soulevées</span></div>
+    </div>
+    <h2>Poids de corps</h2>
+    <div class="card">
+      ${weightChart()}
+      <form id="wform" class="row" style="margin-top:12px">
+        <input type="number" name="kg" step="0.1" inputmode="decimal" placeholder="Poids du jour (kg)" required style="flex:1">
+        <button class="btn primary">Ajouter</button>
+      </form>
+      <p class="small muted" style="margin:10px 0 0">IMC actuel ${m.bmi.toFixed(1).replace('.', ',')} · ${m.bmiLabel}. Pèse-toi le matin à jeun, 1 à 2 fois par semaine.</p>
+    </div>
+    <h2>Records estimés (1RM)</h2>
+    <div class="card">${top.length ? top.map((r) => `<div class="row between tip"><span>${esc(r.name)}</span><span><b>${Math.round(r.v)} kg</b> <span class="muted small">(${r.w} × ${r.r})</span></span></div>`).join('')
+      : '<p class="muted small" style="margin:0">Tes records apparaîtront après tes premières séances enregistrées.</p>'}</div>
+    <h2>Historique</h2>
+    ${state.history.slice().reverse().slice(0, 12).map((h) => `<a class="card row between" href="#/session/${h.week}/${h.dayIndex}">
+      <div><h3>${esc(h.name)}</h3><div class="small muted">${new Date(h.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} · semaine ${h.week} · ${h.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0)} séries</div></div><span class="chev">›</span></a>`).join('')
+      || '<p class="muted small">Aucune séance enregistrée pour l’instant.</p>'}`;
+
+  $app.querySelector('#wform').onsubmit = (e) => {
+    e.preventDefault();
+    const v = parseFloat(e.target.kg.value.replace(',', '.'));
+    if (!(v > 30 && v < 300)) return;
+    state.weights.push({ date: new Date().toISOString(), kg: v });
+    state.profile.weight = v; // le bilan nutritionnel et les charges de départ suivent le poids
+    save(); route();
+  };
+}
+
+function weightChart() {
+  const pts = state.weights.slice(-20);
+  if (pts.length < 2) return `<p class="muted small" style="margin:0">Ajoute au moins deux pesées pour voir la courbe. Dernière : <b>${kg(pts.at(-1)?.kg)}</b>.</p>`;
+  const W = 320; const H = 150; const pad = 24;
+  const vals = pts.map((x) => x.kg); const min = Math.min(...vals) - 1; const max = Math.max(...vals) + 1;
+  const x = (i) => pad + (i * (W - pad * 2)) / (pts.length - 1);
+  const y = (v) => H - pad - ((v - min) / (max - min)) * (H - pad * 2);
+  const d = pts.map((pt, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(pt.kg).toFixed(1)}`).join(' ');
+  const diff = vals.at(-1) - vals[0];
+  return `<div class="row between small"><span class="muted">${pts.length} pesées</span><b>${kg(vals.at(-1))} <span class="muted">(${diff >= 0 ? '+' : ''}${diff.toFixed(1).replace('.', ',')})</span></b></div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Courbe du poids">
+      <line class="grid" x1="${pad}" x2="${W - pad}" y1="${y(max - 1)}" y2="${y(max - 1)}"/><line class="grid" x1="${pad}" x2="${W - pad}" y1="${y(min + 1)}" y2="${y(min + 1)}"/>
+      <text x="2" y="${y(max - 1) + 3}">${Math.round(max - 1)}</text><text x="2" y="${y(min + 1) + 3}">${Math.round(min + 1)}</text>
+      <path class="line" d="${d}"/>${pts.map((pt, i) => `<circle class="dot" cx="${x(i)}" cy="${y(pt.kg)}" r="3"/>`).join('')}
+    </svg>`;
+}
+
+// ---------- Profil ----------
+function renderProfile() {
+  const p = state.profile;
+  if (location.hash === '#/profile/edit') return renderOnboarding(p);
+  const m = bodyMetrics(p);
+  $app.innerHTML = `
+    <div class="eyebrow">Profil</div><h1>${esc(p.name) || 'Mon profil'}</h1>
+    <div class="card">
+      <div class="grid2">
+        <div class="stat"><b>${p.weight} kg</b><span>poids</span></div>
+        <div class="stat"><b>${p.height} cm</b><span>taille</span></div>
+        <div class="stat"><b>${GOALS[p.goal][0]}</b><span>objectif</span></div>
+        <div class="stat"><b>${LEVELS[p.level][0]}</b><span>niveau</span></div>
+      </div>
+      <p class="small muted" style="margin:12px 0">${p.days.length} séances : ${p.days.map((d) => DAY_NAMES[d]).join(', ')} · ${p.duration} min · ${splitFor(p.days.length).name}</p>
+      <a class="btn ghost block" href="#/profile/edit">Modifier mes infos</a>
+    </div>
+    <h2>Bilan énergétique</h2>
+    <div class="card">
+      <div class="tip">Métabolisme de base : <b>${m.bmr} kcal</b></div>
+      <div class="tip">Dépense totale estimée : <b>${m.tdee} kcal</b></div>
+      <div class="tip">Cible pour ton objectif : <b>${m.kcal} kcal</b></div>
+      <div class="tip">Répartition : <b>${m.protein} g</b> protéines · <b>${m.carbs} g</b> glucides · <b>${m.fat} g</b> lipides</div>
+      <p class="small muted" style="margin:8px 0 0">Estimations (formule de Mifflin-St Jeor). Ajuste de 150 kcal si ton poids ne suit pas l’objectif après 2 semaines.</p>
+    </div>
+    <h2>Données</h2>
+    <div class="card">
+      <p class="small muted">Tout est enregistré sur ce téléphone, rien n’est envoyé sur internet.</p>
+      <div class="row"><button class="btn ghost" id="export" style="flex:1">Exporter</button><button class="btn danger" id="reset" style="flex:1">Tout effacer</button></div>
+    </div>
+    <p class="small muted center">Photos des exercices : Free Exercise DB (domaine public).</p>
+    <p class="small muted center">Forge ne remplace pas un avis médical. En cas de douleur ou de pathologie, consulte un professionnel.</p>`;
+  $app.querySelector('#reset').onclick = () => {
+    if (!confirm('Effacer le profil, l’historique et les pesées ?')) return;
+    try { localStorage.removeItem(KEY); } catch { /* rien */ }
+    Object.assign(state, { profile: null, history: [], weights: [], drafts: {} });
+    location.hash = ''; route();
+  };
+  $app.querySelector('#export').onclick = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'forge-sauvegarde.json'; a.click();
+  };
+}
+
+route();
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});

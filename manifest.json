@@ -1,0 +1,15 @@
+{
+  "name": "Forge, coach muscu",
+  "short_name": "Forge",
+  "description": "Programme de musculation personnalisé qui se renouvelle chaque semaine.",
+  "start_url": "./#/today",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1115",
+  "theme_color": "#0f1115",
+  "lang": "fr",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
