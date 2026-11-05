@@ -44,7 +44,12 @@ function route() {
   if (page === 'login') return renderLogin();
   if (page === 'password') return renderNewPassword();
   if (page === 'sante' && state.profile) { $tab.hidden = false; return renderHealthGuide(); }
-  if (!state.profile) return renderOnboarding();
+  if (!state.profile) {
+    // Compte connecté sur ce téléphone mais programme pas encore chargé : on attend le compte
+    // au lieu de reposer les questions.
+    if (Sync.hasStoredSession() && !Sync.getStatus().settled) return renderRestoring();
+    return renderOnboarding();
+  }
   $tab.hidden = false;
   $tab.querySelectorAll('a').forEach((x) => x.classList.toggle('on', x.dataset.tab === (page === 'session' ? 'program' : page)));
   window.scrollTo(0, 0);
@@ -89,7 +94,7 @@ function renderOnboarding(existing) {
   const stepsHtml = existing ? [s1 + s2 + s3] : [s1, s2, s3, '<div id="summary"></div>'];
   $app.innerHTML = `
     <div class="onb">
-      ${existing ? '<div class="eyebrow">Profil</div><h1>Modifier mes infos</h1>' : `<div class="eyebrow">Forge</div><h1>Ton coach muscu personnel</h1><p class="muted">4 questions pour construire un programme qui te ressemble et se renouvelle chaque semaine.</p>${Sync.getStatus().configured ? '<p class="small"><a href="#/login" style="color:var(--accent)">Déjà un compte ? Me connecter pour retrouver mon programme</a></p>' : ''}`}
+      ${existing ? '<div class="eyebrow">Profil</div><h1>Modifier mes infos</h1>' : `<div class="eyebrow">Forge</div><h1>Ton coach muscu personnel</h1><p class="muted">4 questions pour construire un programme qui te ressemble et se renouvelle chaque semaine.</p>${Sync.getStatus().configured ? '<a class="btn ghost block" href="#/login" style="margin:6px 0 4px;border-color:var(--accent);color:var(--accent)">☁ J’ai déjà un compte : me connecter</a><p class="small muted center" style="margin:0 0 6px">Sinon, réponds aux 4 questions ci-dessous.</p>' : ''}`}
       ${existing ? '' : `<div class="progress-dots">${stepsHtml.map(() => '<i></i>').join('')}</div>`}
       <form id="onb">${stepsHtml.map((h, i) => `<section class="onb-step" data-step="${i}">${h}</section>`).join('')}
         <div class="sticky-actions row">
@@ -684,6 +689,15 @@ function renderHealthGuide() {
 }
 
 // ---------- Compte ----------
+let restoring = false;
+function renderRestoring() {
+  restoring = true;
+  $tab.hidden = true;
+  $app.innerHTML = `<div class="center" style="padding-top:30vh">
+    <div class="eyebrow">Forge</div><h1>Récupération de ton programme…</h1>
+    <p class="muted small">Connexion à ton compte.</p></div>`;
+}
+
 function accountCard() {
   const st = Sync.getStatus();
   if (!st.configured) return '<div class="card"><p class="small muted" style="margin:0">La sauvegarde en ligne n’est pas encore activée.</p></div>';
@@ -762,12 +776,16 @@ function renderNewPassword() {
 }
 
 route();
+// Demande à l'iPhone de ne pas effacer les données de l'appli pour libérer de la place.
+try { navigator.storage?.persist?.(); } catch { /* non pris en charge */ }
+
 // Le compte se branche après le premier affichage : l'appli reste utilisable hors ligne.
 Sync.init({
   get: () => state,
   set: (merged) => { Object.assign(state, merged); saveLocal(); },
   setHealth: (rows) => { state.health = rows; applyHealthWeight(); saveLocal(); },
   changed: () => {
+    if (restoring) { restoring = false; route(); return; }
     const [, page = 'today', sub] = location.hash.split('/');
     // On ne redessine jamais un écran en cours de saisie (questionnaire, séance, connexion, champ actif).
     if (!state.profile || ['session', 'login', 'password'].includes(page) || sub === 'edit') return;

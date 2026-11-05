@@ -8,13 +8,19 @@ let client = null;
 let user = null;
 let host = null; // { get(): état, set(état fusionné), changed() }
 let timer = null;
-const status = { configured: !!(SUPABASE_URL && SUPABASE_KEY), ready: false, lastSync: null, pending: false, error: null };
+// settled : le premier essai de connexion au compte est terminé (réussi ou non).
+const status = { configured: !!(SUPABASE_URL && SUPABASE_KEY), ready: false, settled: false, lastSync: null, pending: false, error: null };
 
 export function getStatus() { return { ...status, email: user?.email || null, connected: !!user }; }
 
+// Une session est-elle enregistrée sur ce téléphone ? (lu avant même que la connexion soit établie)
+export function hasStoredSession() {
+  try { return !!localStorage.getItem('forge.auth'); } catch { return false; }
+}
+
 export async function init(h) {
   host = h;
-  if (!status.configured) return;
+  if (!status.configured) { status.settled = true; return; }
   try {
     const { createClient } = await import(LIB);
     client = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'forge.auth' } });
@@ -26,6 +32,7 @@ export async function init(h) {
   } catch (e) {
     status.error = 'Hors connexion : la sauvegarde reprendra au retour du réseau.';
   }
+  status.settled = true;
   host.changed();
   window.addEventListener('online', () => { if (!client) init(host); else if (user) syncNow(); });
   // Au retour dans l'appli (par exemple après le raccourci Santé), on récupère les nouvelles données.
