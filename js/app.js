@@ -611,8 +611,8 @@ function renderLibre() {
       <h2 style="margin:6px 0 10px">${esc(plan.title)}</h2>
       <div class="tip small"><div>Échauffement · ${plan.steps.filter((x) => x.phase === 'warmup').length} min</div></div>
       ${plan.blocks.map((b) => `<div class="tip small"><div><b>${esc(b.name)}</b> · ${b.type === 'machine' ? `${b.rounds} × (${b.work} s effort / ${b.rest} s récup)` : b.type === 'tabata' ? '8 × (20 s / 10 s)' : `${b.rounds} tour${b.rounds > 1 ? 's' : ''} · ${b.work} s / ${b.rest} s`}
-        <div class="vids">${b.exercises.map((e) => `<a href="${freeVideo(e.id, e.name)}" target="_blank" rel="noopener">▶ ${esc(e.name)}</a>`).join('')}</div></div></div>`).join('')}
-      <p class="small muted" style="margin:8px 0 0">Touche un exercice pour voir le mouvement en vidéo avant de commencer.</p>
+        <div class="freeex-list">${b.exercises.map(freeExercisePreview).join('')}</div></div></div>`).join('')}
+      <p class="small muted" style="margin:8px 0 0">Touche un exercice pour voir les photos, les consignes et la vidéo.</p>
       <div class="tip small"><div>Retour au calme · ${plan.steps.filter((x) => x.phase === 'cooldown').length} min</div></div>
       <div class="row" style="margin-top:12px"><button class="btn ghost" id="reroll" style="flex:1">↻ Autre séance</button><button class="btn primary" id="go" style="flex:1">▶ Démarrer</button></div>
     </div>`;
@@ -633,6 +633,19 @@ function renderLibre() {
 function freeVideo(id, name) {
   return id && id.startsWith('m-') ? videoUrl(`${name} intervalles`, 'machine') : videoUrl(name, 'libre');
 }
+// Fiche dépliable d'un exercice dans l'aperçu : photos, consigne, repères et vidéo, comme en muscu.
+function freeExercisePreview(e) {
+  const video = `<a class="btn ghost sm" href="${freeVideo(e.id, e.name)}" target="_blank" rel="noopener">▶ Vidéo</a>`;
+  const media = e.photo
+    ? `<figure class="ex-media" data-media>
+        <img src="media/${e.photo}_0.jpg" alt="${esc(e.name)}, départ" loading="lazy" decoding="async">
+        <img src="media/${e.photo}_1.jpg" alt="${esc(e.name)}, arrivée" loading="lazy" decoding="async" class="end">
+        <figcaption><span class="lbl">Départ ⇄ arrivée</span>${video}</figcaption></figure>`
+    : `<div class="ex-media-actions">${video}</div>`;
+  return `<details class="freeex"><summary>${esc(e.name)}</summary>
+    ${media}<div class="ex-cue">${esc(e.cue || '')}${howtoBlock(e.id)}</div></details>`;
+}
+
 // Photo départ / arrivée + bouton vidéo, comme en séance muscu. Ouvrir la vidéo met la séance en pause.
 function freeMedia(st, ph) {
   if (st.kind !== 'work' || !st.exId) return '';

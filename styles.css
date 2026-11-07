@@ -166,3 +166,13 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 
 .vids { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .vids a { font-size: 12px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; }
+
+.freeex-list { margin-top: 6px; display: grid; gap: 6px; }
+.freeex { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; }
+.freeex summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; color: var(--text); font-weight: 600; }
+.freeex summary::-webkit-details-marker { display: none; }
+.freeex summary::after { content: "▾"; color: var(--muted); transition: transform .2s; }
+.freeex[open] summary::after { transform: rotate(180deg); }
+.freeex .ex-media { margin-top: 10px; }
+.freeex .ex-cue { margin-top: 8px; }
+.tip > div { flex: 1; min-width: 0; }
