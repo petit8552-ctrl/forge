@@ -184,7 +184,9 @@ function eligible(pattern, p, role) {
   if (heavy && role === 'main') pool = pool.filter((e) => !['squat', 'deadlift', 'good-morning', 'front-squat'].includes(e.id)) ;
   // Débutant : exercice principal simple à apprendre.
   if (lvl === 1 && role === 'main') pool = pool.filter((e) => e.diff <= 2);
-  // Les pompes n'ont pas leur place en exercice principal à la salle.
+  // Un exercice principal doit pouvoir se charger et progresser en kilos : pas de poids du corps.
+  if (role === 'main') pool = pool.filter((e) => e.unit !== 'pdc');
+  // Les pompes n'ont pas leur place en exercice secondaire à la salle.
   if (role !== 'acc') pool = pool.filter((e) => e.id !== 'pompes');
   return pool.length ? pool : EXERCISES.filter((e) => e.pattern === pattern);
 }
@@ -236,16 +238,38 @@ export function suggestLoad(ex, p, history, scheme, phaseKey) {
   if (ex.unit === 'pdc') return { load: null, note: ex.bw ? 'Poids du corps (leste-toi si tu dépasses les reps visées)' : 'Poids du corps' };
   const last = lastPerformance(history, ex.id);
   let load; let note;
-  if (!last || !last.sets.some((s) => s.w > 0)) {
+  // Machine à contrepoids : progresser = retirer de l'assistance. Logique inversée, pas de conversion 1RM.
+  if (ex.assisted) {
+    const sets = last ? last.sets.filter((s) => s.w > 0 && s.r > 0) : [];
+    if (!sets.length) return { load: null, assisted: true, note: 'Choisis l’assistance qui permet les reps visées et note-la : Forge la réduira au fil des séances.' };
+    const ref = Math.min(...sets.map((s) => s.w));
+    const inc = increment(ex);
+    if (phaseKey === 'deload') return { load: ref + inc, assisted: true, note: 'Semaine de récupération : un peu plus d’assistance.' };
+    if (sets.every((s) => s.r >= rMax)) return { load: Math.max(0, ref - inc), assisted: true, note: `−${inc} kg d’assistance : tu as atteint le haut de la fourchette.` };
+    if (sets.some((s) => s.r < rMin)) return { load: ref + inc, assisted: true, note: `+${inc} kg d’assistance : reps manquées la dernière fois.` };
+    return { load: ref, assisted: true, note: 'Même assistance : vise une rep de plus par série.' };
+  }
+  if (!last || !last.sets.some((s) => s.w > 0 && s.r > 0)) {
     load = baselineLoad(ex, p, rMax);
     note = 'Charge de départ estimée : ajuste au ressenti.';
   } else {
-    const ref = Math.max(...last.sets.map((s) => s.w || 0));
-    const allTop = last.sets.every((s) => s.r >= rMax);
-    const anyLow = last.sets.some((s) => s.r < rMin);
-    if (allTop) { load = ref + increment(ex); note = `+${increment(ex)} kg : tu as atteint le haut de la fourchette la dernière fois.`; }
-    else if (anyLow) { load = Math.max(step(ex), round(ref * 0.95, step(ex))); note = 'Légère baisse : reps manquées la dernière fois.'; }
-    else { load = ref; note = 'Même charge : vise une rep de plus par série.'; }
+    const sets = last.sets.filter((s) => s.w > 0 && s.r > 0);
+    const ref = Math.max(...sets.map((s) => s.w));
+    const top = sets.reduce((a, s) => (e1rm(s.w, s.r) > e1rm(a.w, a.r) ? s : a), sets[0]);
+    // Fourchette différente de la dernière fois (ex. 3 reps lourdes puis 12 reps) : la charge brute
+    // ne se transpose pas. On repasse par le 1RM estimé, recalculé pour le haut de la nouvelle fourchette.
+    const avgReps = sets.reduce((n, s) => n + s.r, 0) / sets.length;
+    if (avgReps < rMin - 2 || avgReps > rMax + 3) {
+      const min = ex.unit === 'barre' ? 20 : step(ex);
+      load = Math.max(min, Math.floor(e1rm(top.w, top.r) / (1 + rMax / 30) / step(ex)) * step(ex));
+      note = `Charge recalculée depuis ta dernière performance (${top.w} kg × ${top.r}) pour ${rMin}–${rMax} reps.`;
+    } else {
+      const allTop = sets.every((s) => s.r >= rMax);
+      const anyLow = sets.some((s) => s.r < rMin);
+      if (allTop) { load = ref + increment(ex); note = `+${increment(ex)} kg : tu as atteint le haut de la fourchette la dernière fois.`; }
+      else if (anyLow) { load = Math.max(step(ex), round(ref * 0.95, step(ex))); note = 'Légère baisse : reps manquées la dernière fois.'; }
+      else { load = ref; note = 'Même charge : vise une rep de plus par série.'; }
+    }
   }
   if (phaseKey === 'deload' && load) { load = round(load * 0.85, step(ex)); note = 'Semaine de récupération : −15 %.'; }
   return { load, note };
@@ -281,7 +305,7 @@ export function buildSession(p, week, dayIndex, history = [], ready = null) {
     return {
       slot: si, role, pattern, id: ex.id, name: ex.name, cue: ex.cue, muscles: ex.muscles, unit: ex.unit, timed: !!ex.timed,
       sets, repsMin: ex.timed ? 30 : base[1], repsMax: ex.timed ? 45 : base[2], rir: base[3], rest: base[4],
-      load: sug.load, loadNote: sug.note, poolSize: pool.length,
+      load: sug.load, loadNote: sug.note, assisted: !!ex.assisted, poolSize: pool.length,
     };
   });
 
@@ -308,7 +332,7 @@ export function buildSession(p, week, dayIndex, history = [], ready = null) {
     for (const e of exercises) {
       e.sets = Math.max(2, e.sets - 1);
       e.rir += 1;
-      if (e.load) { e.load = Math.max(step(BY_ID[e.id]), round(e.load * 0.9, step(BY_ID[e.id]))); e.loadNote = 'Charge allégée de 10 % : récupération insuffisante.'; }
+      if (e.load && !e.assisted) { e.load = Math.max(step(BY_ID[e.id]), round(e.load * 0.9, step(BY_ID[e.id]))); e.loadNote = 'Charge allégée de 10 % : récupération insuffisante.'; }
     }
     technique = null;
     if (cardio) cardio = { name: 'Cardio très léger', detail: '15 min de marche ou de vélo facile, sans essoufflement.', impact: 'low' };

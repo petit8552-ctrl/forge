@@ -5,6 +5,7 @@
 // bw      : exercice au poids du corps exigeant un bon rapport force / poids (tractions, dips…)
 // coef    : charge ≈ 10RM d'un pratiquant intermédiaire, en fraction du poids de corps (par haltère si unit = 'halteres')
 // unit    : 'barre' | 'halteres' | 'machine' | 'poulie' | 'pdc'
+// assisted: la charge notée est une assistance (contrepoids) : la réduire rend l'exercice plus dur
 
 export const EXERCISES = [
   // Squat / dominante quadriceps
@@ -46,7 +47,7 @@ export const EXERCISES = [
 
   // Tirage vertical
   { id: 'pullup', name: 'Tractions', pattern: 'vpull', kind: 'compound', diff: 2, bw: true, coef: 0, unit: 'pdc', muscles: ['dos', 'biceps'], cue: 'Départ bras tendus, menton au-dessus de la barre, sans balancer.' },
-  { id: 'assisted-pullup', name: 'Tractions assistées', pattern: 'vpull', kind: 'compound', diff: 1, coef: 0, unit: 'machine', muscles: ['dos', 'biceps'], cue: 'Choisis l’assistance qui permet les répétitions visées. Réduis-la au fil des semaines.' },
+  { id: 'assisted-pullup', name: 'Tractions assistées', pattern: 'vpull', kind: 'compound', diff: 1, coef: 0, assisted: true, unit: 'machine', muscles: ['dos', 'biceps'], cue: 'Choisis l’assistance qui permet les répétitions visées. Réduis-la au fil des semaines.' },
   { id: 'lat-pulldown', name: 'Tirage vertical prise large', pattern: 'vpull', kind: 'compound', diff: 1, coef: 0.6, unit: 'poulie', muscles: ['dos', 'biceps'], cue: 'Tire la barre vers le haut de la poitrine, coudes vers le bas.' },
   { id: 'close-pulldown', name: 'Tirage vertical prise serrée', pattern: 'vpull', kind: 'compound', diff: 1, coef: 0.6, unit: 'poulie', muscles: ['dos', 'biceps'], cue: 'Prise neutre, buste légèrement incliné en arrière.' },
   { id: 'chinup', name: 'Tractions supination', pattern: 'vpull', kind: 'compound', diff: 2, bw: true, coef: 0, unit: 'pdc', muscles: ['dos', 'biceps'], cue: 'Paumes vers toi, poitrine vers la barre.' },

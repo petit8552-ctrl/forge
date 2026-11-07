@@ -1,0 +1,9 @@
+{
+  "name": "forge",
+  "private": true,
+  "type": "module",
+  "description": "Aucune dépendance : ce fichier sert seulement à lancer les tests (npm test).",
+  "scripts": {
+    "test": "node --test"
+  }
+}

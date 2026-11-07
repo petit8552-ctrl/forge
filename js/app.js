@@ -38,8 +38,21 @@ const GOALS = {
 const LEVELS = { debutant: ['Débutant', '< 6 mois'], intermediaire: ['Intermédiaire', '6 mois – 2 ans'], avance: ['Avancé', '> 2 ans'] };
 const ROLE = { main: 'Principal', sec: 'Secondaire', acc: 'Accessoire' };
 
+// ---------- Retour d'un lien reçu par email (confirmation, mot de passe oublié) ----------
+// Lu au chargement, avant que Supabase ne nettoie l'adresse.
+const hashParams = new URLSearchParams(location.hash.replace(/^#\/?/, ''));
+let recoveryPending = hashParams.get('type') === 'recovery';
+let authLinkError = hashParams.get('error_description')
+  ? (/expired|invalid/i.test(hashParams.get('error_description') + hashParams.get('error_code'))
+    ? 'Ce lien a expiré ou a déjà servi. Redemande un email « Mot de passe oublié ».'
+    : hashParams.get('error_description'))
+  : null;
+const isAuthCallback = () => /access_token=/.test(location.hash);
+if (authLinkError) history.replaceState(null, '', location.pathname + '#/login');
+
 // ---------- Routage ----------
 function route() {
+  if (isAuthCallback()) return renderRestoring('Connexion à ton compte…');
   const [, page = 'today', a, b] = location.hash.split('/');
   if (page === 'login') return renderLogin();
   if (page === 'password') return renderNewPassword();
@@ -362,9 +375,13 @@ function renderSession(week, dayIndex) {
       const { slot, set } = btn.dataset;
       const ex = s.exercises.find((x) => x.slot === +slot);
       const st = data.exercises[slot].sets[set];
-      if (!st.done && (st.r === '' || st.r == null)) {
-        st.r = ex.repsMax;
-        btn.closest('.set').querySelector('[data-field=r]').value = st.r;
+      // Pas de valeur inventée : une série validée sans reps notées ferait croire au moteur
+      // que le haut de la fourchette est atteint, et la charge monterait à tort.
+      if (!st.done && !(st.r > 0)) {
+        const inp = btn.closest('.set').querySelector('[data-field=r]');
+        inp.classList.add('need'); inp.focus();
+        inp.addEventListener('input', () => inp.classList.remove('need'), { once: true });
+        return;
       }
       st.done = !st.done;
       btn.closest('.set').classList.toggle('done', st.done);
@@ -418,7 +435,7 @@ function exerciseCard(e, i, d, locked) {
       <span class="pill accent">${e.sets} × ${range} ${unit}</span>
       <span class="pill">RIR ${e.rir}</span>
       <span class="pill">Repos ${e.rest >= 120 ? (e.rest / 60).toString().replace('.', ',') + ' min' : e.rest + ' s'}</span>
-      ${e.load ? `<span class="pill">${kg(e.load)}${e.unit === 'halteres' ? ' / haltère' : ''}</span>` : ''}
+      ${e.load ? `<span class="pill">${e.assisted ? 'Assistance ' : ''}${kg(e.load)}${e.unit === 'halteres' ? ' / haltère' : ''}</span>` : ''}
     </div>
     ${mediaBlock(e)}
     <div class="ex-cue">${esc(e.cue)}${e.loadNote ? `<br><span style="color:var(--text)">${esc(e.loadNote)}</span>` : ''}</div>
@@ -592,7 +609,9 @@ function renderProfile() {
   };
   bindAccount();
   $app.querySelector('#export').onclick = () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    // Le code Apple Santé est un secret : il ne part pas dans un fichier qu'on peut partager.
+    const { healthToken, ...exported } = state;
+    const blob = new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'forge-sauvegarde.json'; a.click();
   };
 }
@@ -690,12 +709,31 @@ function renderHealthGuide() {
 
 // ---------- Compte ----------
 let restoring = false;
-function renderRestoring() {
+function renderRestoring(title = 'Récupération de ton programme…') {
   restoring = true;
   $tab.hidden = true;
   $app.innerHTML = `<div class="center" style="padding-top:30vh">
-    <div class="eyebrow">Forge</div><h1>Récupération de ton programme…</h1>
+    <div class="eyebrow">Forge</div><h1>${esc(title)}</h1>
     <p class="muted small">Connexion à ton compte.</p></div>`;
+}
+
+const INPUT_STYLE = 'width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:12px;font:inherit';
+// Champ mot de passe avec bouton Afficher : sur téléphone, une faute de frappe invisible bloque le compte.
+const passwordField = (label, name, autocomplete) => `<label class="field"><span>${label}</span>
+  <div class="row"><input type="password" name="${name}" autocomplete="${autocomplete}" required style="${INPUT_STYLE};flex:1">
+  <button type="button" class="btn ghost sm" data-reveal="${name}">Afficher</button></div></label>`;
+function bindReveal(root) {
+  root.querySelectorAll('[data-reveal]').forEach((b) => b.addEventListener('click', () => {
+    const inp = root.querySelector(`input[name="${b.dataset.reveal}"]`);
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    b.textContent = show ? 'Masquer' : 'Afficher';
+  }));
+}
+function passwordProblem(pw) {
+  if (pw.length < Sync.MIN_PASSWORD) return `Mot de passe trop court : ${Sync.MIN_PASSWORD} caractères minimum.`;
+  if (!/[a-zA-Z]/.test(pw) || !/[0-9]/.test(pw)) return 'Mélange au moins des lettres et des chiffres.';
+  return null;
 }
 
 function accountCard() {
@@ -716,8 +754,9 @@ function accountCard() {
 function authForm(intro) {
   return `<p class="small muted">${intro}</p>
     <form id="auth">
-      <label class="field"><span>Email</span><input type="email" name="email" autocomplete="email" required style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:12px;font:inherit"></label>
-      <label class="field"><span>Mot de passe (6 caractères minimum)</span><input type="password" name="password" autocomplete="current-password" minlength="6" required style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:12px;font:inherit"></label>
+      <label class="field"><span>Email</span><input type="email" name="email" autocomplete="email" required style="${INPUT_STYLE}"></label>
+      ${passwordField('Mot de passe', 'password', 'current-password')}
+      <p class="small muted" style="margin:-4px 0 6px">Nouveau compte : ${Sync.MIN_PASSWORD} caractères minimum, lettres et chiffres.</p>
       <p class="small" id="authmsg" style="min-height:1em"></p>
       <div class="row"><button class="btn primary" data-act="signin" style="flex:1">Se connecter</button><button class="btn ghost" data-act="signup" style="flex:1">Créer mon compte</button></div>
       <p class="small center" style="margin-top:12px"><a href="#" id="forgot" class="muted">Mot de passe oublié ?</a></p>
@@ -730,11 +769,15 @@ function bindAccount(after) {
   const form = $app.querySelector('#auth'); if (!form) return;
   const msg = form.querySelector('#authmsg');
   const say = (t, ok) => { msg.textContent = t; msg.style.color = ok ? 'var(--ok)' : 'var(--warn)'; };
+  bindReveal(form);
+  if (authLinkError) { say(authLinkError); authLinkError = null; }
   let act = 'signin';
   form.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => { act = b.dataset.act; }));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = form.email.value.trim(); const pw = form.password.value;
+    // La règle de longueur ne s'applique qu'à la création : les comptes existants gardent leur mot de passe.
+    if (act === 'signup' && passwordProblem(pw)) return say(passwordProblem(pw));
     form.querySelectorAll('button').forEach((b) => { b.disabled = true; });
     try {
       if (act === 'signup') {
@@ -765,13 +808,35 @@ function renderLogin() {
 
 function renderNewPassword() {
   $tab.hidden = true;
-  $app.innerHTML = `<div class="eyebrow">Compte</div><h1>Nouveau mot de passe</h1>
+  const st = Sync.getStatus();
+  if (!st.settled) return renderRestoring('Vérification du lien…');
+  if (!st.connected) {
+    $app.innerHTML = `<div class="eyebrow">Compte</div><h1>Nouveau mot de passe</h1>
+      <div class="card" style="margin-top:14px"><p class="small" style="margin:0 0 12px">Ce lien a expiré ou a déjà servi. Redemande un email depuis l’écran de connexion (« Mot de passe oublié ? »).</p>
+      <a class="btn primary block" href="#/login">Aller à la connexion</a></div>`;
+    return;
+  }
+  $app.innerHTML = `<div class="eyebrow">Compte · ${esc(st.email)}</div><h1>Nouveau mot de passe</h1>
     <form id="np" class="card" style="margin-top:14px">
-      <label class="field"><span>Nouveau mot de passe</span><input type="password" name="pw" minlength="6" required autocomplete="new-password" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:12px;font:inherit"></label>
-      <p class="small" id="npmsg"></p><button class="btn primary block">Enregistrer</button></form>`;
-  $app.querySelector('#np').onsubmit = async (e) => {
+      ${passwordField('Nouveau mot de passe', 'pw', 'new-password')}
+      ${passwordField('Confirme-le', 'pw2', 'new-password')}
+      <p class="small muted" style="margin:-4px 0 6px">${Sync.MIN_PASSWORD} caractères minimum, lettres et chiffres.</p>
+      <p class="small" id="npmsg" style="min-height:1em;color:var(--warn)"></p><button class="btn primary block">Enregistrer</button></form>`;
+  const form = $app.querySelector('#np');
+  const msg = form.querySelector('#npmsg');
+  bindReveal(form);
+  form.onsubmit = async (e) => {
     e.preventDefault();
-    try { await Sync.updatePassword(e.target.pw.value); location.hash = '#/today'; route(); } catch (err) { $app.querySelector('#npmsg').textContent = err.message; }
+    const pw = form.pw.value;
+    if (pw !== form.pw2.value) { msg.textContent = 'Les deux mots de passe ne sont pas identiques.'; return; }
+    if (passwordProblem(pw)) { msg.textContent = passwordProblem(pw); return; }
+    const btn = form.querySelector('.btn.primary'); btn.disabled = true;
+    try {
+      await Sync.updatePassword(pw);
+      $app.innerHTML = `<div class="eyebrow">Compte</div><h1>Mot de passe changé ✓</h1>
+        <div class="card" style="margin-top:14px"><p class="small" style="margin:0 0 12px">Utilise-le désormais pour te connecter sur tes autres téléphones.</p>
+        <a class="btn primary block" href="#/today">Continuer</a></div>`;
+    } catch (err) { msg.textContent = err.message; btn.disabled = false; }
   };
 }
 
@@ -784,7 +849,10 @@ Sync.init({
   get: () => state,
   set: (merged) => { Object.assign(state, merged); saveLocal(); },
   setHealth: (rows) => { state.health = rows; applyHealthWeight(); saveLocal(); },
+  // Retour du lien « mot de passe oublié » : on ouvre directement l'écran du nouveau mot de passe.
+  recovery: () => { recoveryPending = false; restoring = false; location.hash = '#/password'; },
   changed: () => {
+    if (recoveryPending && Sync.getStatus().connected) { recoveryPending = false; restoring = false; location.hash = '#/password'; return; }
     if (restoring) { restoring = false; route(); return; }
     const [, page = 'today', sub] = location.hash.split('/');
     // On ne redessine jamais un écran en cours de saisie (questionnaire, séance, connexion, champ actif).

@@ -8,6 +8,9 @@ let client = null;
 let user = null;
 let host = null; // { get(): état, set(état fusionné), changed() }
 let timer = null;
+// À régler aussi côté Supabase (Authentication › Providers › Email › longueur minimale),
+// sinon la règle ne vaut que dans l'appli et se contourne en appelant l'API directement.
+export const MIN_PASSWORD = 8;
 // settled : le premier essai de connexion au compte est terminé (réussi ou non).
 const status = { configured: !!(SUPABASE_URL && SUPABASE_KEY), ready: false, settled: false, lastSync: null, pending: false, error: null };
 
@@ -24,9 +27,15 @@ export async function init(h) {
   try {
     const { createClient } = await import(LIB);
     client = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'forge.auth' } });
+    // Abonnement AVANT getSession : l'événement PASSWORD_RECOVERY (retour du lien « mot de passe oublié »)
+    // est émis pendant l'initialisation du client et serait perdu sinon.
+    client.auth.onAuthStateChange((event, session) => {
+      user = session?.user || null;
+      if (event === 'PASSWORD_RECOVERY' && host.recovery) host.recovery();
+      host.changed();
+    });
     const { data } = await client.auth.getSession();
     user = data.session?.user || null;
-    client.auth.onAuthStateChange((_e, session) => { user = session?.user || null; host.changed(); });
     status.ready = true;
     if (user) await syncNow();
   } catch (e) {
@@ -44,7 +53,11 @@ function friendly(err) {
   if (/Invalid login credentials/i.test(m)) return 'Email ou mot de passe incorrect.';
   if (/Email not confirmed/i.test(m)) return 'Confirme d’abord ton email : clique sur le lien reçu, puis reconnecte-toi.';
   if (/already registered/i.test(m)) return 'Ce compte existe déjà : connecte-toi.';
-  if (/Password should be/i.test(m)) return 'Mot de passe trop court (6 caractères minimum).';
+  if (/Password should be|weak.?password/i.test(m)) return `Mot de passe trop faible (${MIN_PASSWORD} caractères minimum, mélange lettres et chiffres).`;
+  if (/should be different/i.test(m)) return 'Choisis un mot de passe différent de l’ancien.';
+  if (/not authorized/i.test(m)) return 'L’envoi d’emails n’est pas encore ouvert à tous les comptes. Préviens l’équipe Forge.';
+  if (/rate limit|only request this after|too many/i.test(m)) return 'Trop de demandes d’affilée : réessaie dans quelques minutes.';
+  if (/session missing|expired|invalid.*(token|jwt)/i.test(m)) return 'Lien expiré ou déjà utilisé : redemande un email « Mot de passe oublié ».';
   if (/fetch|network/i.test(m)) return 'Pas de connexion internet.';
   return m;
 }
@@ -68,11 +81,14 @@ export async function signIn(email, password) {
 
 export async function resetPassword(email) {
   if (!client) throw new Error('Sauvegarde en ligne indisponible.');
-  const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname + '#/password' });
+  // Pas de « #/… » dans l'adresse de retour : Supabase y ajoute lui-même « #access_token=… »,
+  // et deux « # » empêchent de lire le jeton. L'écran du nouveau mot de passe s'ouvre via PASSWORD_RECOVERY.
+  const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
   if (error) throw new Error(friendly(error));
 }
 
 export async function updatePassword(password) {
+  if (!client || !user) throw new Error('Lien expiré ou déjà utilisé : redemande un email « Mot de passe oublié ».');
   const { error } = await client.auth.updateUser({ password });
   if (error) throw new Error(friendly(error));
 }
@@ -128,11 +144,20 @@ export async function syncNow() {
 export function merge(local, remote = {}) {
   const deleted = [...new Set([...(local.deleted || []), ...(remote.deleted || [])])];
   const gone = new Set(deleted);
-  const byDate = (a, b) => {
+  const byDate = (a, b, key = (x) => x.date, better = () => true) => {
     const m = new Map();
-    for (const x of [...(a || []), ...(b || [])]) if (x && x.date && !gone.has(x.date)) m.set(x.date, x);
+    for (const x of [...(a || []), ...(b || [])]) {
+      if (!x || !x.date || gone.has(x.date)) continue;
+      const k = key(x); const cur = m.get(k);
+      if (!cur || better(x, cur)) m.set(k, x);
+    }
     return [...m.values()].sort((x, y) => x.date.localeCompare(y.date));
   };
+  // Une même séance (semaine + jour) enregistrée sur deux téléphones n'est gardée qu'une fois :
+  // celle qui a le plus de séries validées, sinon la plus récente.
+  const doneSets = (h) => (h.exercises || []).reduce((n, e) => n + (e.sets || []).filter((s) => s.done).length, 0);
+  const sessionKey = (h) => (h.week != null && h.dayIndex != null ? `${h.week}|${h.dayIndex}` : h.date);
+  const betterSession = (x, cur) => doneSets(x) > doneSets(cur) || (doneSets(x) === doneSets(cur) && x.date > cur.date);
   const lp = local.profile; const rp = remote.profile;
   let profile = lp || rp || null;
   if (lp && rp) profile = (rp.updatedAt || rp.startDate || '') > (lp.updatedAt || lp.startDate || '') ? rp : lp;
@@ -141,5 +166,5 @@ export function merge(local, remote = {}) {
     const start = [lp.startDate, rp.startDate].filter(Boolean).sort()[0];
     profile = { ...profile, startDate: start };
   }
-  return { profile, history: byDate(local.history, remote.history), weights: byDate(local.weights, remote.weights), deleted };
+  return { profile, history: byDate(local.history, remote.history, sessionKey, betterSession), weights: byDate(local.weights, remote.weights), deleted };
 }
