@@ -1,7 +1,7 @@
 // Service worker : met l'app en cache pour qu'elle fonctionne hors ligne à la salle.
 // Les photos sont mises en cache au fil des séances consultées.
 // À incrémenter à chaque mise en ligne pour que les téléphones jettent l'ancienne version.
-const CACHE = 'forge-v6';
+const CACHE = 'forge-v7';
 const FILES = ['./', './index.html', './styles.css', './manifest.json', './icon.svg', './js/app.js', './js/engine.js', './js/exercises.js', './js/media.js', './js/sync.js', './js/config.js'];
 
 self.addEventListener('install', (e) => {

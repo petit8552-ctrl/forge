@@ -126,6 +126,7 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 /* Minuteur de repos */
 #timer { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(80px + var(--safe-b)); width: min(488px, calc(100% - 32px)); background: var(--surface-2); border: 1px solid var(--accent); border-radius: 16px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; z-index: 20; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); }
 #timer[hidden] { display: none; }
+#timer.go { border-color: var(--ok); background: rgba(74, 222, 128, .15); }
 #timer .t { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 72px; }
 #timer .grow { flex: 1; }
 

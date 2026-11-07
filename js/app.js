@@ -471,26 +471,95 @@ document.addEventListener('click', (ev) => {
 // ---------- Minuteur de repos ----------
 const $timer = document.getElementById('timer');
 let timerId = null;
+
+// Son de fin de repos. Les bips sont programmés dans le moteur audio dès le départ du minuteur
+// (au moment du toucher, seul moment où iPhone autorise le son), puis annulés si on passe ou ajoute 30 s.
+// Limite : écran verrouillé ou appli en arrière-plan = pas de son. D'où le maintien de l'écran allumé.
+const SOUND_KEY = 'forge.sound';
+const soundOn = () => { try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; } };
+let audioCtx = null;
+let scheduled = [];
+function audio() {
+  try {
+    // « transient » : son court qui baisse la musique en cours au lieu de la couper (Safari récent).
+    if (navigator.audioSession) navigator.audioSession.type = 'transient';
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  } catch { return null; }
+}
+function beep(ctx, at, freq, dur) {
+  const osc = ctx.createOscillator(); const gain = ctx.createGain();
+  osc.type = 'sine'; osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(0.6, at + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(at); osc.stop(at + dur + 0.05);
+  scheduled.push(osc);
+}
+function scheduleEndSound(seconds) {
+  cancelSound();
+  if (!soundOn()) return;
+  const ctx = audio(); if (!ctx) return;
+  const end = ctx.currentTime + seconds;
+  // 3 tops courts avant la fin, puis 3 bips aigus : « c'est reparti ».
+  for (const s of [3, 2, 1]) if (seconds > s) beep(ctx, end - s, 660, 0.12);
+  for (const s of [0, 0.25, 0.5]) beep(ctx, end + s, 1040, 0.2);
+}
+function cancelSound() {
+  for (const o of scheduled) { try { o.stop(0); o.disconnect(); } catch { /* déjà terminé */ } }
+  scheduled = [];
+}
+// Garde l'écran allumé pendant le repos, sinon le téléphone se met en veille et le son ne part pas.
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && navigator.wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch { /* non pris en charge ou refusé */ }
+}
+
 function startTimer(seconds, label) {
   stopTimer();
   let left = seconds;
   const end = Date.now() + seconds * 1000;
   $timer.hidden = false;
+  scheduleEndSound(seconds);
+  keepAwake(true);
   const paint = () => {
     const m = Math.floor(left / 60); const sec = String(left % 60).padStart(2, '0');
     $timer.innerHTML = `<div class="t">${m}:${sec}</div><div class="grow small"><b>Repos</b><div class="muted">${esc(label)}</div></div>
+      <button class="btn sm ghost" id="tsound" aria-label="${soundOn() ? 'Couper le son' : 'Activer le son'}">${soundOn() ? '🔔' : '🔕'}</button>
       <button class="btn sm ghost" id="tplus">+30 s</button><button class="btn sm primary" id="tskip">Passer</button>`;
     $timer.querySelector('#tplus').onclick = () => { startTimer(left + 30, label); };
     $timer.querySelector('#tskip').onclick = stopTimer;
+    $timer.querySelector('#tsound').onclick = () => {
+      try { localStorage.setItem(SOUND_KEY, soundOn() ? 'off' : 'on'); } catch { /* rien */ }
+      scheduleEndSound(left); paint();
+    };
   };
   paint();
   timerId = setInterval(() => {
     left = Math.max(0, Math.round((end - Date.now()) / 1000));
-    if (left <= 0) { stopTimer(); if (navigator.vibrate) navigator.vibrate([200, 100, 200]); return; }
+    if (left <= 0) {
+      clearInterval(timerId); timerId = null;
+      if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
+      // Le bandeau reste 2 s en « C'est reparti » pour ceux qui ont coupé le son.
+      $timer.innerHTML = '<div class="t">0:00</div><div class="grow"><b>C’est reparti 💪</b><div class="small muted">Série suivante</div></div>';
+      $timer.classList.add('go');
+      setTimeout(() => { if (!timerId) stopTimer(); }, 2500);
+      return;
+    }
     paint();
   }, 1000);
 }
-function stopTimer() { clearInterval(timerId); timerId = null; $timer.hidden = true; }
+function stopTimer() {
+  clearInterval(timerId); timerId = null; $timer.hidden = true; $timer.classList.remove('go');
+  cancelSound(); keepAwake(false);
+}
 
 // ---------- Progrès ----------
 function renderProgress() {
