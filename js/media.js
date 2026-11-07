@@ -80,6 +80,13 @@ export function photos(id) {
 }
 
 // Recherche vidéo YouTube de l’exécution (ouvre l’appli YouTube sur le téléphone).
-export function videoUrl(name) {
-  return `https://www.youtube.com/results?search_query=${encodeURIComponent(name + " exécution technique musculation")}`;
+// Recherche YouTube (pas de vidéo hébergée : toujours à jour, rien à stocker).
+// Les mots ajoutés orientent vers des tutoriels plutôt que vers des compilations.
+const VIDEO_HINT = {
+  muscu: 'exécution technique musculation',
+  libre: 'exercice comment bien faire',
+  machine: 'fractionné entraînement',
+};
+export function videoUrl(name, kind = 'muscu') {
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(`${name} ${VIDEO_HINT[kind] || VIDEO_HINT.muscu}`)}`;
 }

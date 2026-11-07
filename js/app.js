@@ -611,7 +611,8 @@ function renderLibre() {
       <h2 style="margin:6px 0 10px">${esc(plan.title)}</h2>
       <div class="tip small"><div>Échauffement · ${plan.steps.filter((x) => x.phase === 'warmup').length} min</div></div>
       ${plan.blocks.map((b) => `<div class="tip small"><div><b>${esc(b.name)}</b> · ${b.type === 'machine' ? `${b.rounds} × (${b.work} s effort / ${b.rest} s récup)` : b.type === 'tabata' ? '8 × (20 s / 10 s)' : `${b.rounds} tour${b.rounds > 1 ? 's' : ''} · ${b.work} s / ${b.rest} s`}
-        <div class="muted">${b.exercises.map((e) => esc(e.name)).join(' · ')}</div></div></div>`).join('')}
+        <div class="vids">${b.exercises.map((e) => `<a href="${freeVideo(e.id, e.name)}" target="_blank" rel="noopener">▶ ${esc(e.name)}</a>`).join('')}</div></div></div>`).join('')}
+      <p class="small muted" style="margin:8px 0 0">Touche un exercice pour voir le mouvement en vidéo avant de commencer.</p>
       <div class="tip small"><div>Retour au calme · ${plan.steps.filter((x) => x.phase === 'cooldown').length} min</div></div>
       <div class="row" style="margin-top:12px"><button class="btn ghost" id="reroll" style="flex:1">↻ Autre séance</button><button class="btn primary" id="go" style="flex:1">▶ Démarrer</button></div>
     </div>`;
@@ -626,6 +627,21 @@ function renderLibre() {
   }));
   $app.querySelector('#reroll').onclick = () => set({ seed: o.seed + 1 });
   $app.querySelector('#go').onclick = () => { startPlayer(plan); location.hash = '#/libre/go'; };
+}
+
+// Vidéo d'un exercice de séance libre (les machines cardio : vidéo de fractionné).
+function freeVideo(id, name) {
+  return id && id.startsWith('m-') ? videoUrl(`${name} intervalles`, 'machine') : videoUrl(name, 'libre');
+}
+// Photo départ / arrivée + bouton vidéo, comme en séance muscu. Ouvrir la vidéo met la séance en pause.
+function freeMedia(st, ph) {
+  if (st.kind !== 'work' || !st.exId) return '';
+  const name = st.label.replace(/ : effort$/, '');
+  const video = `<a class="btn ghost sm" data-pvideo href="${freeVideo(st.exId, name)}" target="_blank" rel="noopener">▶ Vidéo</a>`;
+  if (!ph) return `<div class="ex-media-actions" style="text-align:center">${video}</div>`;
+  return `<figure class="ex-media" data-media>
+      <img src="${ph.start}" alt="${esc(name)}, départ"><img src="${ph.end}" alt="${esc(name)}, arrivée" class="end">
+      <figcaption><span class="lbl">Départ ⇄ arrivée</span>${video}</figcaption></figure>`;
 }
 
 // Lecteur : enchaîne les étapes (effort / récup) avec décompte et bips.
@@ -734,8 +750,7 @@ function paintPlayer(full) {
       <h1 style="margin:4px 0 6px">${esc(st.label)}</h1>
       <p class="muted small" style="margin:0 0 12px">${esc(st.cue || '')}</p>
       ${st.kind === 'work' && st.exId ? `<div class="small muted" style="text-align:left;margin:0 auto 12px;max-width:420px">${howtoBlock(st.exId)}</div>` : ''}
-      ${ph ? `<figure class="ex-media" data-media><img src="${ph.start}" alt="${esc(st.label)}, départ"><img src="${ph.end}" alt="${esc(st.label)}, arrivée" class="end"></figure>`
-        : st.exId && !st.exId.startsWith('m-') ? `<a class="btn ghost sm" href="${videoUrl(st.label)}" target="_blank" rel="noopener">▶ Voir le mouvement en vidéo</a>` : ''}
+      ${freeMedia(st, ph)}
     </div>
     <div class="card small" style="margin-top:14px">${next ? `Ensuite : <b>${esc(next.label)}</b> · ${next.secs} s` : 'Dernière étape 🔥'}</div>
     <div class="sticky-actions row">
@@ -745,6 +760,8 @@ function paintPlayer(full) {
     </div>`;
   $app.querySelector('#ptoggle').onclick = () => { if (player.paused) resumePlayer(); else pausePlayer(); paintPlayer(true); };
   $app.querySelector('#pskip').onclick = skipStep;
+  // Regarder la vidéo fait quitter l'appli : on met en pause pour ne pas perdre l'étape.
+  $app.querySelectorAll('[data-pvideo]').forEach((a) => a.addEventListener('click', () => { if (!player.paused) pausePlayer(); }));
   $app.querySelector('#pstop').onclick = () => { pausePlayer(); finishPlayer(false); };
   $app.querySelector('#psound').onclick = () => {
     try { localStorage.setItem(SOUND_KEY, soundOn() ? 'off' : 'on'); } catch { /* rien */ }
