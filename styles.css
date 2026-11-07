@@ -138,3 +138,28 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .sticky-actions { position: sticky; bottom: calc(76px + var(--safe-b)); padding-top: 10px; background: linear-gradient(transparent, var(--bg) 30%); }
 .onb .sticky-actions { bottom: 0; padding-bottom: 12px; }
 .center { text-align: center; }
+
+/* Séance libre : lecteur */
+.player { text-align: center; padding: 8px 0; }
+.player .pclock { font-size: 72px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1; margin: 6px 0; }
+.player.work .pclock { color: var(--accent); }
+.player.rest .pclock { color: var(--blue); }
+.player .ex-media { margin-top: 8px; }
+
+/* Récompenses */
+.badges { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.badge { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px; opacity: .55; }
+.badge.on { opacity: 1; border-color: rgba(198, 244, 50, .35); }
+.badge .ic { font-size: 22px; display: block; }
+.badge b { display: block; font-size: 13px; margin-top: 4px; }
+.badge small { color: var(--muted); font-size: 11px; }
+.toast { position: fixed; left: 50%; top: calc(16px + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 50; background: var(--surface-2); border: 1px solid var(--accent); border-radius: 14px; padding: 12px 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); font-size: 14px; animation: toast-in .3s ease-out; width: min(440px, calc(100% - 32px)); }
+.toast .ic { font-size: 18px; }
+.toast.out { opacity: 0; transition: opacity .6s; }
+@keyframes toast-in { from { transform: translate(-50%, -20px); opacity: 0; } }
+
+/* Repères d'exécution */
+.howto { margin-top: 8px; display: grid; gap: 4px; font-size: 13px; }
+.howto div { display: flex; gap: 8px; align-items: baseline; }
+.howto span:first-child { flex: none; width: 18px; text-align: center; }
+.howto span + span { flex: 1; min-width: 0; }

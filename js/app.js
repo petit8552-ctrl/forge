@@ -6,6 +6,9 @@ import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { BY_ID, PATTERN_LABEL } from './exercises.js';
 import { photos, videoUrl } from './media.js';
 import * as Sync from './sync.js';
+import { buildFreeSession, PLACES, EQUIP, MACHINES, DEFAULT_EQUIP, GOALS_LIBRE, DURATIONS } from './libre.js';
+import { badges, newBadges, weekStreak } from './rewards.js';
+import { howto } from './coaching.js';
 
 // ---------- État persistant ----------
 const KEY = 'forge.v1';
@@ -66,8 +69,10 @@ function route() {
   $tab.hidden = false;
   $tab.querySelectorAll('a').forEach((x) => x.classList.toggle('on', x.dataset.tab === (page === 'session' ? 'program' : page)));
   window.scrollTo(0, 0);
+  if (player && !(page === 'libre' && a === 'go')) pausePlayer();
   if (page === 'program') return renderProgram(a ? +a : currentWeek(state.profile));
   if (page === 'session') return renderSession(+a, +b);
+  if (page === 'libre') return a === 'go' ? renderPlayer() : renderLibre();
   if (page === 'progress') return renderProgress();
   if (page === 'profile') return renderProfile();
   return renderToday();
@@ -229,6 +234,7 @@ function renderToday() {
       <div><h3>☁ Sauvegarde ton programme</h3><div class="small muted">Crée ton compte pour ne jamais perdre tes séances.</div></div><span class="chev">›</span></a>` : ''}
     ${formeCard()}
     ${main}
+    <a class="card row between" href="#/libre"><div><h3>⚡ Séance libre</h3><div class="small muted">Plage, plein air, maison ou salle : une séance chronométrée selon ton matériel et ton temps.</div></div><span class="chev">›</span></a>
     <h2>Ta journée</h2>
     ${m.measured ? `<p class="small muted">Calories ajustées sur ta dépense réelle : ${m.active} kcal d’énergie active par jour en moyenne (montre).</p>` : ''}
     <div class="grid2">
@@ -414,10 +420,12 @@ function renderSession(week, dayIndex) {
     }));
     const doneSets = exercises.reduce((n, e) => n + e.sets.filter((x) => x.done).length, 0);
     if (!doneSets && !confirm('Aucune série cochée. Enregistrer quand même ?')) return;
+    const before = [...state.history];
     state.history.push({ week, dayIndex, name: s.name, date: new Date().toISOString(), exercises });
     delete state.drafts[key];
     stopTimer(); save();
     location.hash = '#/today';
+    celebrate(newBadges(before, state.history, p));
   };
 }
 
@@ -438,7 +446,7 @@ function exerciseCard(e, i, d, locked) {
       ${e.load ? `<span class="pill">${e.assisted ? 'Assistance ' : ''}${kg(e.load)}${e.unit === 'halteres' ? ' / haltère' : ''}</span>` : ''}
     </div>
     ${mediaBlock(e)}
-    <div class="ex-cue">${esc(e.cue)}${e.loadNote ? `<br><span style="color:var(--text)">${esc(e.loadNote)}</span>` : ''}</div>
+    <div class="ex-cue">${esc(e.cue)}${howtoBlock(e.id)}${e.loadNote ? `<div style="color:var(--text);margin-top:6px">${esc(e.loadNote)}</div>` : ''}</div>
     <div class="sets">
       <div class="set-head"><span>#</span><span>kg</span><span>${unit}</span><span></span></div>
       ${sets.map((st, k) => `<div class="set ${st.done ? 'done' : ''}">
@@ -449,6 +457,15 @@ function exerciseCard(e, i, d, locked) {
       </div>`).join('')}
     </div>
   </div>`;
+}
+
+// Repères d'exécution : où sentir, quelle phase ralentir, où marquer un temps.
+function howtoBlock(id) {
+  const h = howto(id); if (!h) return '';
+  return `<div class="howto">
+    <div><span>🎯</span><span><b>Sentir</b> : ${esc(h.feel)}</span></div>
+    ${h.slow !== '—' ? `<div><span>🐢</span><span><b>Ralentir</b> : ${esc(h.slow)}</span></div>` : ''}
+    <div><span>⏸</span><span><b>Temps fort</b> : ${esc(h.hold)}</span></div></div>`;
 }
 
 // Photos départ / arrivée en fondu alterné : on voit le mouvement et la machine.
@@ -561,18 +578,210 @@ function stopTimer() {
   cancelSound(); keepAwake(false);
 }
 
+// ---------- Séance libre ----------
+// Réglages gardés sur le téléphone : on retrouve son lieu et son matériel habituels.
+function libreOpts() {
+  const p = state.profile;
+  const o = state.libre || {};
+  const place = o.place || 'salle';
+  return {
+    goal: o.goal || 'mixte', place, minutes: o.minutes || 30,
+    equip: o.equip || [...DEFAULT_EQUIP[place]], seed: o.seed || 0,
+    level: p.level, lowImpact: bodyMetrics(p).bmi >= 30,
+  };
+}
+function renderLibre() {
+  const o = libreOpts();
+  const plan = buildFreeSession(o, o.seed);
+  const machinesHere = o.place === 'salle' || o.place === 'maison';
+  const chip = (group, val, on, label, sub) => `<button type="button" class="chip ${on ? 'on' : ''}" data-g="${group}" data-val="${val}">${label}${sub ? `<small>${sub}</small>` : ''}</button>`;
+  const equipKeys = Object.keys(EQUIP).filter((k) => machinesHere || !MACHINES.includes(k));
+  $app.innerHTML = `
+    <div class="eyebrow">Hors programme</div><h1>Séance libre</h1>
+    <p class="muted small">Une séance chronométrée, faite pour ce que tu as sous la main. Elle compte pour ta régularité et tes badges, sans toucher aux charges de ton programme.</p>
+    <div class="card">
+      <label class="field"><span>Objectif</span><div class="chips">${Object.entries(GOALS_LIBRE).map(([k, [l, sub]]) => chip('goal', k, o.goal === k, l, sub)).join('')}</div></label>
+      <label class="field"><span>Où ?</span><div class="chips">${Object.entries(PLACES).map(([k, [l, ic]]) => chip('place', k, o.place === k, `${ic} ${l}`)).join('')}</div></label>
+      <label class="field"><span>Ton matériel</span><div class="chips">${equipKeys.map((k) => chip('equip', k, o.equip.includes(k), EQUIP[k])).join('')}</div>
+        <small class="muted">${o.equip.length ? '' : 'Rien de coché : séance 100 % poids du corps.'}</small></label>
+      <label class="field"><span>Durée</span><div class="chips">${DURATIONS.map((m) => chip('minutes', m, o.minutes === m, `${m} min`)).join('')}</div></label>
+    </div>
+    <div class="card hero">
+      <div class="row between"><div class="eyebrow">Ta séance</div><span class="pill">≈ ${Math.round(plan.seconds / 60)} min</span></div>
+      <h2 style="margin:6px 0 10px">${esc(plan.title)}</h2>
+      <div class="tip small"><div>Échauffement · ${plan.steps.filter((x) => x.phase === 'warmup').length} min</div></div>
+      ${plan.blocks.map((b) => `<div class="tip small"><div><b>${esc(b.name)}</b> · ${b.type === 'machine' ? `${b.rounds} × (${b.work} s effort / ${b.rest} s récup)` : b.type === 'tabata' ? '8 × (20 s / 10 s)' : `${b.rounds} tour${b.rounds > 1 ? 's' : ''} · ${b.work} s / ${b.rest} s`}
+        <div class="muted">${b.exercises.map((e) => esc(e.name)).join(' · ')}</div></div></div>`).join('')}
+      <div class="tip small"><div>Retour au calme · ${plan.steps.filter((x) => x.phase === 'cooldown').length} min</div></div>
+      <div class="row" style="margin-top:12px"><button class="btn ghost" id="reroll" style="flex:1">↻ Autre séance</button><button class="btn primary" id="go" style="flex:1">▶ Démarrer</button></div>
+    </div>`;
+
+  const set = (patch) => { state.libre = { ...o, ...patch }; delete state.libre.level; delete state.libre.lowImpact; saveLocal(); renderLibre(); };
+  $app.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => {
+    const { g, val } = b.dataset;
+    if (g === 'place') set({ place: val, equip: [...DEFAULT_EQUIP[val]], seed: 0 });
+    else if (g === 'equip') set({ equip: o.equip.includes(val) ? o.equip.filter((x) => x !== val) : [...o.equip, val], seed: 0 });
+    else if (g === 'minutes') set({ minutes: +val, seed: 0 });
+    else set({ [g]: val, seed: 0 });
+  }));
+  $app.querySelector('#reroll').onclick = () => set({ seed: o.seed + 1 });
+  $app.querySelector('#go').onclick = () => { startPlayer(plan); location.hash = '#/libre/go'; };
+}
+
+// Lecteur : enchaîne les étapes (effort / récup) avec décompte et bips.
+let player = null; // { plan, idx, endAt, left, paused, elapsed, lastTick, done }
+let playerTick = null;
+function startPlayer(plan) {
+  stopTimer();
+  player = { plan, idx: 0, left: plan.steps[0].secs, paused: true, elapsed: 0, lastTick: null, started: false };
+  resumePlayer();
+}
+function scheduleSteps() {
+  cancelSound();
+  if (!soundOn() || !player) return;
+  const ctx = audio(); if (!ctx) return;
+  let t = ctx.currentTime + player.left;
+  for (let i = player.idx + 1; i <= player.plan.steps.length; i++) {
+    const next = player.plan.steps[i];
+    if (!next) { for (const d of [0, 0.25, 0.5, 0.75]) beep(ctx, t + d, 1040, 0.2); break; }
+    if (next.kind === 'work') { for (const s of [3, 2, 1]) if (t - s > ctx.currentTime) beep(ctx, t - s, 660, 0.12); beep(ctx, t, 1040, 0.35); }
+    else beep(ctx, t, 440, 0.4);
+    t += next.secs;
+    if (i - player.idx > 400) break;
+  }
+}
+function resumePlayer() {
+  if (!player) return;
+  player.paused = false; player.started = true; player.lastTick = Date.now();
+  scheduleSteps(); keepAwake(true);
+  clearInterval(playerTick);
+  playerTick = setInterval(tickPlayer, 250);
+}
+function pausePlayer() {
+  if (!player || player.paused) return;
+  tickPlayer();
+  player.paused = true; clearInterval(playerTick); playerTick = null;
+  cancelSound(); keepAwake(false);
+  if (location.hash.startsWith('#/libre/go')) paintPlayer(true);
+}
+function tickPlayer() {
+  if (!player || player.paused) return;
+  const now = Date.now();
+  const dt = (now - player.lastTick) / 1000; player.lastTick = now;
+  player.left -= dt; player.elapsed += dt;
+  let changed = false;
+  while (player.left <= 0 && player.idx < player.plan.steps.length) {
+    player.idx++; changed = true;
+    if (player.idx >= player.plan.steps.length) { finishPlayer(true); return; }
+    player.left += player.plan.steps[player.idx].secs;
+    if (navigator.vibrate) navigator.vibrate(player.plan.steps[player.idx].kind === 'work' ? [150, 80, 150] : 300);
+  }
+  if (location.hash.startsWith('#/libre/go')) paintPlayer(changed);
+}
+function skipStep() {
+  if (!player) return;
+  player.idx++;
+  if (player.idx >= player.plan.steps.length) { finishPlayer(true); return; }
+  player.left = player.plan.steps[player.idx].secs;
+  if (!player.paused) { player.lastTick = Date.now(); scheduleSteps(); }
+  paintPlayer(true);
+}
+function finishPlayer(completed) {
+  clearInterval(playerTick); playerTick = null; cancelSound(); keepAwake(false);
+  const pl = player; player = null;
+  const minutes = Math.round(pl.elapsed / 60);
+  if (!completed && minutes < 5) { location.hash = '#/libre'; return; }
+  if (!completed && !confirm(`Enregistrer les ${minutes} min faites ?`)) { location.hash = '#/libre'; return; }
+  const ids = new Map();
+  for (const st of pl.plan.steps.slice(0, pl.idx + 1)) if (st.exId && st.kind === 'work') ids.set(st.exId, st.label.replace(/ : effort$/, ''));
+  const before = [...state.history];
+  state.history.push({ type: 'libre', name: pl.plan.title, goal: pl.plan.goal, place: pl.plan.place, minutes, date: new Date().toISOString(),
+    exercises: [...ids].map(([id, name]) => ({ id, name, sets: [] })) });
+  state.libre = { ...(state.libre || {}), seed: ((state.libre || {}).seed || 0) + 1 }; // la prochaine fois, une autre séance
+  save();
+  $tab.hidden = false;
+  $app.innerHTML = `<div class="center" style="padding-top:18vh"><div class="eyebrow">Séance libre</div><h1>${completed ? 'Séance terminée 💪' : 'Séance enregistrée'}</h1>
+    <p class="muted">${minutes} min · ${esc(pl.plan.title)}</p>
+    <div class="row" style="margin-top:18px"><a class="btn ghost" href="#/progress" style="flex:1">Mes progrès</a><a class="btn primary" href="#/today" style="flex:1">Accueil</a></div></div>`;
+  celebrate(newBadges(before, state.history, state.profile));
+}
+function renderPlayer() {
+  if (!player) { location.hash = '#/libre'; return; }
+  $tab.hidden = true;
+  paintPlayer(true);
+}
+function paintPlayer(full) {
+  const pl = player; if (!pl) return;
+  const st = pl.plan.steps[pl.idx];
+  const next = pl.plan.steps[pl.idx + 1];
+  const left = Math.max(0, Math.ceil(pl.left));
+  const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  const total = pl.plan.steps.reduce((t, x) => t + x.secs, 0);
+  const doneSecs = pl.plan.steps.slice(0, pl.idx).reduce((t, x) => t + x.secs, 0) + (st.secs - pl.left);
+  if (!full && $app.querySelector('#pclock')) {
+    $app.querySelector('#pclock').textContent = clock;
+    $app.querySelector('#pbar').style.width = `${Math.min(100, (doneSecs / total) * 100)}%`;
+    return;
+  }
+  const ph = st.photo ? { start: `media/${st.photo}_0.jpg`, end: `media/${st.photo}_1.jpg` } : null;
+  $app.innerHTML = `
+    <div class="row between"><div class="eyebrow">${esc(st.block)}${st.pos ? ` · ${esc(st.pos)}` : ''}</div>
+      <button class="btn ghost sm" id="psound">${soundOn() ? '🔔' : '🔕'}</button></div>
+    <div class="phasebar" style="margin:10px 0 16px"><i class="on" id="pbar" style="width:${Math.min(100, (doneSecs / total) * 100)}%;flex:none"></i></div>
+    <div class="player ${st.kind}">
+      <div class="small muted">${st.kind === 'work' ? (st.phase === 'main' ? 'Effort' : '') : 'Récupération'}</div>
+      <div class="pclock" id="pclock">${clock}</div>
+      <h1 style="margin:4px 0 6px">${esc(st.label)}</h1>
+      <p class="muted small" style="margin:0 0 12px">${esc(st.cue || '')}</p>
+      ${st.kind === 'work' && st.exId ? `<div class="small muted" style="text-align:left;margin:0 auto 12px;max-width:420px">${howtoBlock(st.exId)}</div>` : ''}
+      ${ph ? `<figure class="ex-media" data-media><img src="${ph.start}" alt="${esc(st.label)}, départ"><img src="${ph.end}" alt="${esc(st.label)}, arrivée" class="end"></figure>`
+        : st.exId && !st.exId.startsWith('m-') ? `<a class="btn ghost sm" href="${videoUrl(st.label)}" target="_blank" rel="noopener">▶ Voir le mouvement en vidéo</a>` : ''}
+    </div>
+    <div class="card small" style="margin-top:14px">${next ? `Ensuite : <b>${esc(next.label)}</b> · ${next.secs} s` : 'Dernière étape 🔥'}</div>
+    <div class="sticky-actions row">
+      <button class="btn ghost" id="pstop">■ Terminer</button>
+      <button class="btn ghost" id="pskip">⏭ Suivant</button>
+      <button class="btn primary" id="ptoggle" style="flex:1">${pl.paused ? '▶ Reprendre' : '⏸ Pause'}</button>
+    </div>`;
+  $app.querySelector('#ptoggle').onclick = () => { if (player.paused) resumePlayer(); else pausePlayer(); paintPlayer(true); };
+  $app.querySelector('#pskip').onclick = skipStep;
+  $app.querySelector('#pstop').onclick = () => { pausePlayer(); finishPlayer(false); };
+  $app.querySelector('#psound').onclick = () => {
+    try { localStorage.setItem(SOUND_KEY, soundOn() ? 'off' : 'on'); } catch { /* rien */ }
+    if (!player.paused) scheduleSteps(); else cancelSound();
+    paintPlayer(true);
+  };
+}
+
+// ---------- Récompenses ----------
+function rewardsCard(p) {
+  const list = badges(state.history, p);
+  const earned = list.filter((b) => b.earned);
+  // On montre tout ce qui est gagné, puis les 4 prochains objectifs les plus proches.
+  const next = list.filter((b) => !b.earned).sort((a, b) => b.progress / b.goal - a.progress / a.goal).slice(0, 4);
+  const tile = (b) => `<div class="badge ${b.earned ? 'on' : ''}"><span class="ic">${b.icon}</span><b>${esc(b.name)}</b><small>${b.earned ? esc(b.desc) : `${b.progress}/${b.goal} · ${esc(b.desc)}`}</small></div>`;
+  return `<div class="card"><p class="small muted" style="margin:0 0 10px">${earned.length}/${list.length} badges · série actuelle : <b>${weekStreak(state.history)} sem.</b></p>
+    <div class="badges">${earned.map(tile).join('')}${next.map(tile).join('')}</div></div>`;
+}
+function celebrate(list) {
+  if (!list || !list.length) return;
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = list.slice(0, 3).map((b) => `<div><span class="ic">${b.icon}</span> Badge débloqué : <b>${esc(b.name)}</b></div>`).join('');
+  document.body.appendChild(el);
+  if (soundOn()) { const ctx = audio(); if (ctx) [0, 0.12, 0.24].forEach((d, i) => beep(ctx, ctx.currentTime + d, [784, 988, 1318][i], 0.18)); }
+  setTimeout(() => el.classList.add('out'), 3500);
+  setTimeout(() => el.remove(), 4200);
+}
+
 // ---------- Progrès ----------
 function renderProgress() {
   const p = state.profile;
-  const week = currentWeek(p);
   const total = state.history.length;
   const tonnage = state.history.reduce((t, h) => t + h.exercises.reduce((a, e) => a + e.sets.filter((s) => s.done).reduce((b, s) => b + s.w * s.r, 0), 0), 0);
   // Régularité : semaines consécutives (jusqu'à la semaine en cours) avec au moins une séance.
-  let streak = 0;
-  for (let w = week; w >= 1; w--) {
-    if (state.history.some((h) => h.week === w)) streak++;
-    else if (w !== week) break;
-  }
+  // Régularité : semaines calendaires d'affilée avec au moins une séance, libres comprises.
+  const streak = weekStreak(state.history);
   const records = {};
   for (const h of state.history) for (const e of h.exercises) for (const s of e.sets) {
     if (!s.done || !s.w || !s.r) continue;
@@ -601,10 +810,15 @@ function renderProgress() {
     <h2>Records estimés (1RM)</h2>
     <div class="card">${top.length ? top.map((r) => `<div class="row between tip"><span>${esc(r.name)}</span><span><b>${Math.round(r.v)} kg</b> <span class="muted small">(${r.w} × ${r.r})</span></span></div>`).join('')
       : '<p class="muted small" style="margin:0">Tes records apparaîtront après tes premières séances enregistrées.</p>'}</div>
+    <h2>Récompenses</h2>
+    ${rewardsCard(p)}
     <h2>Historique</h2>
-    ${state.history.slice().reverse().slice(0, 12).map((h) => `<a class="card row between" href="#/session/${h.week}/${h.dayIndex}">
-      <div><h3>${esc(h.name)}</h3><div class="small muted">${new Date(h.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} · semaine ${h.week} · ${h.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0)} séries</div></div><span class="chev">›</span></a>`).join('')
-      || '<p class="muted small">Aucune séance enregistrée pour l’instant.</p>'}`;
+    ${state.history.slice().reverse().slice(0, 12).map((h) => {
+      const day = new Date(h.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+      if (h.type === 'libre') return `<div class="card row between"><div><h3>⚡ ${esc(h.name)}</h3><div class="small muted">${day} · séance libre · ${h.minutes} min</div></div></div>`;
+      return `<a class="card row between" href="#/session/${h.week}/${h.dayIndex}">
+      <div><h3>${esc(h.name)}</h3><div class="small muted">${day} · semaine ${h.week} · ${h.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0)} séries</div></div><span class="chev">›</span></a>`;
+    }).join('') || '<p class="muted small">Aucune séance enregistrée pour l’instant.</p>'}`;
 
   $app.querySelector('#wform').onsubmit = (e) => {
     e.preventDefault();
