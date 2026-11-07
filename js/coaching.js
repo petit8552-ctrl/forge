@@ -121,6 +121,7 @@ export const HOWTO = {
   'l-epaule-jete': ['Jambes, fessiers, haut du dos.', 'Redescends en contrôlant.', '1 s haltères aux épaules.'],
   'l-sprint': ['Jambes, souffle.', 'Retour en marchant.', 'Accélère progressivement les premiers mètres.'],
   'l-saut-longueur': ['Cuisses, fessiers.', 'Réception amortie.', '1 s stable après la réception.'],
+  'l-footing': ['Souffle régulier, jambes.', 'Allure où tu peux parler par phrases courtes.', 'Pas d’arrêt : ralentis plutôt que de t’arrêter.'],
   'l-ours': ['Épaules, abdos, cuisses.', 'Lentement, genoux à 2 cm du sol.', 'Pas d’arrêt.'],
 };
 

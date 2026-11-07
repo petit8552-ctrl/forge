@@ -20,7 +20,12 @@ export const DEFAULT_EQUIP = {
 export const GOALS_LIBRE = {
   cardio: ['Cardio', 'Souffle, brûler'], muscu: ['Renfo', 'Muscles, circuit'], mixte: ['Mixte', 'Les deux'],
 };
-export const DURATIONS = [15, 20, 30, 45];
+export const DURATIONS = [15, 20, 30, 45, 60, 75, 90];
+// Durées proposées selon l'objectif : jusqu'à 1 h 30 en cardio (endurance + intervalles),
+// 1 h en renfo ou mixte (au-delà, un circuit au poids du corps n'apporte plus grand-chose).
+export function durationsFor(goal) {
+  return DURATIONS.filter((m) => m <= (goal === 'cardio' ? 90 : 60));
+}
 
 // kind : force | cardio · group : jambes | poussee | tirage | gainage | complet
 // impact : high = sauts (déconseillé débutant / IMC élevé) · outdoor : besoin d'espace (dehors, plage)
@@ -73,8 +78,39 @@ export const FREE = [
   // Besoin d'espace : plein air et plage (sur le sable, l'effort double)
   { id: 'l-sprint', name: 'Sprint', kind: 'cardio', group: 'complet', impact: 'high', diff: 1, outdoor: true, photo: 'Wind_Sprints', cue: '20 à 30 m à fond, retour en marchant.' },
   { id: 'l-saut-longueur', name: 'Sauts en longueur', kind: 'cardio', group: 'jambes', impact: 'high', diff: 2, outdoor: true, photo: 'Standing_Long_Jump', cue: 'Pieds joints, élan des bras, réception genoux fléchis.' },
+  { id: 'l-footing', name: 'Footing', kind: 'endurance', group: 'complet', impact: 'low', diff: 1, outdoor: true, photo: null, anim: 'l-footing', cue: 'Allure où tu peux parler par phrases courtes. Sur le sable : foulée courte, ou marche rapide.' },
   { id: 'l-ours', name: 'Marche de l’ours', kind: 'cardio', group: 'complet', impact: 'low', diff: 2, outdoor: true, photo: null, anim: 'l-ours', cue: 'À quatre pattes, genoux décollés, avance main/pied opposés.' },
 ];
+
+// Secondes par répétition à bon rythme (niveau avancé). Sert à donner un objectif de reps
+// pour un effort chronométré. Absent = exercice au temps (gainage, corde, sprint, déplacements…).
+const SEC_PER_REP = {
+  'l-squat': 2.2, 'l-fentes': 2.5, 'l-pont': 2.5, 'l-pont-1j': 3, 'l-step': 2.5, 'l-squat-saute': 2.5,
+  'l-fentes-sautees': 2.2, 'l-squat-halteres': 2.5, 'l-rdl-halteres': 3, 'l-goblet': 2.8, 'l-squat-elastique': 2.3,
+  'l-pompes': 2.5, 'l-pompes-inclinees': 2.2, 'l-pompes-pieds': 3, 'l-dips-banc': 2.5, 'l-dev-halteres': 2.5,
+  'l-dev-elastique': 2.2, 'l-australien': 3, 'l-rowing-halteres': 2.5, 'l-ecartes-elastique': 2.2, 'l-superman': 3,
+  'l-crunch-velo': 1.5, 'l-russian': 1.2, 'l-burpees': 3.5, 'l-jacks': 1, 'l-tuck': 2.5, 'l-patineur': 1.5,
+  'l-swing': 2, 'l-epaule-jete': 3, 'l-saut-longueur': 5, 'l-inchworm': 6,
+};
+const LEVEL_PACE = { debutant: 0.7, intermediaire: 0.85, avance: 1 };
+
+// Objectif affiché pour un effort de `secs` secondes : « ≈ 10–13 reps » ou « au temps ».
+export function repTarget(id, secs, level = 'intermediaire') {
+  if (id === 'l-tractions') return { reps: null, text: 'max de reps propres' };
+  const spr = SEC_PER_REP[id];
+  if (!spr) return { reps: null, text: 'au temps, sans t’arrêter' };
+  const hi = Math.max(2, Math.round((secs / spr) * (LEVEL_PACE[level] || 0.85)));
+  const lo = Math.max(1, Math.round(hi * 0.75));
+  return { reps: [lo, hi], text: `≈ ${lo}–${hi} reps` };
+}
+
+// Endurance : effort continu à allure modérée, découpé en tranches de 5 min (repère + bip).
+const ENDURANCE = {
+  velo: 'Allure modérée, résistance moyenne : tu peux parler par phrases courtes.',
+  tapis: 'Course lente ou marche rapide en pente : tu peux parler par phrases courtes.',
+  rameur: 'Coups réguliers, sans forcer : tu peux parler par phrases courtes.',
+  elliptique: 'Allure régulière, résistance moyenne : tu peux parler par phrases courtes.',
+};
 
 // Cardio sur machine : intervalles (effort / récupération active).
 export const MACHINE_CARDIO = {
@@ -111,7 +147,7 @@ export function freePool(opts) {
   const lvl = LEVEL[opts.level] || 1;
   const eq = new Set(opts.equip || []);
   const space = opts.place === 'dehors' || opts.place === 'plage';
-  return FREE.filter((e) => (!e.equip || eq.has(e.equip))
+  return FREE.filter((e) => e.kind !== 'endurance' && (!e.equip || eq.has(e.equip))
     && (!e.outdoor || space)
     && e.diff <= lvl + 1
     // Sauts : jamais si impact faible demandé (IMC élevé, genoux), et seulement les plus simples pour un débutant.
@@ -170,16 +206,43 @@ export function buildFreeSession(opts, seed = 0) {
   const used = new Set();
   const short = opts.minutes <= 20;
   const warmSteps = short ? 3 : 5; const coolSteps = short ? 2 : 3;
-  const budget = opts.minutes * 60 - (warmSteps + coolSteps) * 60;
+  const fullBudget = opts.minutes * 60 - (warmSteps + coolSteps) * 60;
+  let budget = fullBudget; // temps restant pour les blocs après l'endurance
   const n = short ? 4 : 5;
+  const blocks = [];
+
+  // Cardio long (1 h et plus) : d'abord un bloc d'endurance à allure modérée, puis les intervalles.
+  // Enchaîner 1 h 30 d'intervalles serait épuisant et ce n'est pas ainsi qu'on construit l'endurance.
+  if (opts.goal === 'cardio' && opts.minutes >= 60) {
+    // Peu d'exercices possibles (débutant, sans matériel) : plus d'endurance, moins de circuits qui se répètent.
+    const variety = pool.filter((e) => e.kind === 'cardio').length;
+    const share = variety < 9 ? 0.55 : 0.45;
+    const secs = Math.min(variety < 9 ? 50 : 40, Math.round((budget / 60) * share / 5) * 5) * 60;
+    const space = opts.place === 'dehors' || opts.place === 'plage';
+    let ex; let cue;
+    if (machines.length) {
+      const m = machines[Math.floor(rand() * machines.length)];
+      ex = [{ id: `m-${m}`, name: MACHINE_CARDIO[m].name, photo: MACHINE_CARDIO[m].photo }]; cue = ENDURANCE[m];
+    } else if (space) {
+      const f = FREE.find((e) => e.id === 'l-footing');
+      ex = [f]; cue = f.cue;
+    } else {
+      // Ni machine ni espace : cardio continu, un exercice sans saut par tranche de 5 min.
+      ex = shuffle(pool.filter((e) => e.kind === 'cardio' && e.impact === 'low'), rand).slice(0, 4);
+      cue = 'Rythme régulier, sans t’arrêter : tu peux parler par phrases courtes.';
+    }
+    if (ex.length) {
+      blocks.push({ type: 'endurance', name: 'Endurance', work: 300, rest: 0, perRound: 1, roundRest: 0, rounds: secs / 300, maxRounds: secs / 300, exercises: ex, cue });
+      budget -= secs + BETWEEN;
+    }
+  }
 
   // Ordre des blocs selon l'objectif (on en prend autant que le temps permet).
-  const plan = opts.goal === 'muscu' ? ['force', 'force', 'force']
-    : opts.goal === 'cardio' ? (machines.length ? ['machine', 'cardio', 'machine'] : ['cardio', 'tabata', 'cardio'])
-      : ['force', machines.length ? 'machine' : 'cardio', 'force'];
+  const plan = opts.goal === 'muscu' ? ['force', 'force', 'force', 'force', 'force']
+    : opts.goal === 'cardio' ? (machines.length ? ['machine', 'cardio', 'machine', 'cardio', 'tabata'] : ['cardio', 'tabata', 'cardio', 'tabata', 'cardio'])
+      : ['force', machines.length ? 'machine' : 'cardio', 'force', 'tabata', 'force'];
   const nBlocks = Math.max(1, Math.min(plan.length, Math.round(budget / (9 * 60))));
 
-  const blocks = [];
   for (const type of plan.slice(0, nBlocks)) {
     if (type === 'machine') {
       const m = machines[Math.floor(rand() * machines.length)];
@@ -195,12 +258,17 @@ export function buildFreeSession(opts, seed = 0) {
       blocks.push({ type, name: 'Tabata', work: 20, rest: 10, perRound: 2, roundRest: 0, rounds: 4, maxRounds: 4, exercises: ex });
     } else {
       const isForce = type === 'force';
+      // Pas de 3e circuit du même type s'il ne reste presque que des exercices déjà faits :
+      // on ajoute plutôt des tours aux circuits existants.
+      const kindPool = pool.filter((e) => e.kind === (isForce ? 'force' : 'cardio'));
+      const fresh = kindPool.filter((e) => !used.has(e.id)).length;
+      if (blocks.filter((x) => x.type === (isForce ? 'force' : 'cardio')).length >= 2 && fresh < 3) continue;
       const ex = isForce ? forceCircuit(pool, rand, used, n) : cardioCircuit(pool, rand, used, n);
       if (ex.length < 2) continue;
       ex.forEach((e) => used.add(e.id));
       blocks.push({ type: isForce ? 'force' : 'cardio', name: isForce ? 'Circuit renfo' : 'Circuit cardio',
         work: isForce ? pace.work : Math.min(pace.work, 40), rest: isForce ? pace.rest : Math.max(pace.rest, 20),
-        perRound: ex.length, roundRest: 60, rounds: 1, maxRounds: pace.rounds[1] + 1, exercises: ex });
+        perRound: ex.length, roundRest: 60, rounds: 1, maxRounds: pace.rounds[1] + (opts.minutes >= 60 ? 2 : 1), exercises: ex });
     }
   }
   // Remplissage : on ajoute des tours à tour de rôle tant que ça tient dans le temps.
@@ -208,11 +276,11 @@ export function buildFreeSession(opts, seed = 0) {
   for (let grew = true; grew;) {
     grew = false;
     for (const b of [...blocks].sort((x, y) => x.rounds - y.rounds)) {
-      if (b.rounds < b.maxRounds && used_() + roundSeconds(b) <= budget) { b.rounds++; grew = true; }
+      if (b.rounds < b.maxRounds && used_() + roundSeconds(b) <= fullBudget) { b.rounds++; grew = true; }
     }
   }
   // Reste au moins 2 min : finisher gainage (ou cardio) pour coller à la durée demandée.
-  const left = budget - used_() - BETWEEN;
+  const left = fullBudget - used_() - BETWEEN;
   if (left >= 120) {
     const fin = pickOne(pool.filter((e) => e.group === 'gainage' && !used.has(e.id)), rand) || pickOne(pool.filter((e) => e.group === 'gainage'), rand);
     if (fin) {
@@ -248,6 +316,10 @@ export function blockGuide(b) {
   if (b.type === 'machine') {
     return { minutes: min, text: `Sur le ${b.exercises[0].name.toLowerCase()}, sans descendre : ${b.work} s d’effort fort, puis ${b.rest} s à allure facile. Répète ${b.rounds} fois.` };
   }
+  if (b.type === 'endurance') {
+    const what = b.exercises.length > 1 ? `${b.exercises.length} exercices sans saut, 5 min chacun, sans pause` : `${b.exercises[0].name.toLowerCase()} en continu`;
+    return { minutes: min, text: `${min} min d’effort modéré : ${what}. Tu dois pouvoir parler par phrases courtes. Un bip toutes les 5 min.` };
+  }
   if (b.type === 'finisher') {
     return { minutes: min, text: `Un seul exercice pour finir : ${b.work} s d’effort, ${b.rest} s de repos, ${b.rounds} fois.` };
   }
@@ -267,6 +339,12 @@ export function toSteps(blocks, warmSteps = 5, coolSteps = 3) {
     for (let r = 0; r < b.rounds; r++) {
       for (let k = 0; k < b.perRound; k++) {
         const e = b.exercises[k % b.exercises.length];
+        if (b.type === 'endurance') {
+          const ex = b.exercises[r % b.exercises.length];
+          steps.push({ phase: 'main', kind: 'work', label: b.exercises.length > 1 || ex.id.startsWith('m-') ? `${ex.name} : endurance` : ex.name, cue: b.cue,
+            exId: ex.id, photo: ex.photo, anim: ex.anim, secs: b.work, block: b.name, pos: `Tranche ${r + 1}/${b.rounds} · 5 min` });
+          continue;
+        }
         const machine = b.type === 'machine' && MACHINE_CARDIO[b.machine];
         steps.push({ phase: 'main', kind: 'work', label: machine ? `${e.name} : effort` : e.name, cue: machine ? machine.work : e.cue,
           exId: e.id, photo: e.photo, anim: e.anim, secs: b.work, block: b.name, pos: stepPos(b, r, k) });
