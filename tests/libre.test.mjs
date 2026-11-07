@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { HOWTO } from '../js/coaching.js';
 import { EXERCISES } from '../js/exercises.js';
-import { buildFreeSession, FREE, PLACES, GOALS_LIBRE, DURATIONS, EQUIP, MACHINES } from '../js/libre.js';
+import { buildFreeSession, repTarget, durationsFor, FREE, PLACES, GOALS_LIBRE, EQUIP, MACHINES } from '../js/libre.js';
 
 const BY = Object.fromEntries(FREE.map((e) => [e.id, e]));
 const LEVELS = ['debutant', 'intermediaire', 'avance'];
@@ -11,7 +11,7 @@ const EQUIP_SETS = [[], ['corde'], ['halteres', 'banc'], ['barre', 'banc', 'elas
 
 function* allCases() {
   for (const place of Object.keys(PLACES)) for (const goal of Object.keys(GOALS_LIBRE))
-    for (const minutes of DURATIONS) for (const level of LEVELS) for (const equip of EQUIP_SETS)
+    for (const minutes of durationsFor(goal)) for (const level of LEVELS) for (const equip of EQUIP_SETS)
       yield { place, goal, minutes, level, equip };
 }
 
@@ -95,4 +95,28 @@ test('mode d’emploi de chaque bloc : clair et cohérent avec la séance', asyn
     assert.ok(g.text.length > 30 && g.minutes >= 1, b.name);
     if (b.type === 'force' || b.type === 'cardio') assert.match(g.text, new RegExp(`${b.work} s`));
   }
+});
+
+test('durées : cardio jusqu’à 1 h 30, renfo et mixte jusqu’à 1 h', () => {
+  assert.equal(Math.max(...durationsFor('cardio')), 90);
+  assert.equal(Math.max(...durationsFor('muscu')), 60);
+  assert.equal(Math.max(...durationsFor('mixte')), 60);
+});
+
+test('cardio long : commence par un bloc d’endurance, footing seulement dehors ou à la plage', () => {
+  for (const place of Object.keys(PLACES)) for (const minutes of [60, 75, 90]) {
+    const s = buildFreeSession({ place, goal: 'cardio', minutes, level: 'intermediaire', equip: [] }, 1);
+    assert.equal(s.blocks[0].type, 'endurance', `${place} ${minutes}`);
+    const ids = s.blocks[0].exercises.map((e) => e.id);
+    assert.equal(ids.includes('l-footing'), place === 'dehors' || place === 'plage', `${place} : ${ids}`);
+  }
+  assert.notEqual(buildFreeSession({ place: 'plage', goal: 'cardio', minutes: 45, level: 'intermediaire', equip: [] }, 1).blocks[0].type, 'endurance');
+});
+
+test('objectif de reps : cohérent avec la durée et le niveau ; au temps pour le gainage', () => {
+  const deb = repTarget('l-burpees', 40, 'debutant').reps; const av = repTarget('l-burpees', 40, 'avance').reps;
+  assert.ok(deb[1] < av[1] && av[1] <= 12, `${deb} / ${av}`);
+  assert.ok(repTarget('l-squat', 40, 'avance').reps[1] > repTarget('l-squat', 20, 'avance').reps[1]);
+  assert.equal(repTarget('l-planche', 40).reps, null);
+  assert.equal(repTarget('l-corde', 40).reps, null);
 });

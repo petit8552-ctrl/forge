@@ -6,7 +6,7 @@ import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { BY_ID, PATTERN_LABEL } from './exercises.js';
 import { photos, videoUrl } from './media.js';
 import * as Sync from './sync.js';
-import { buildFreeSession, blockGuide, PLACES, EQUIP, MACHINES, DEFAULT_EQUIP, GOALS_LIBRE, DURATIONS } from './libre.js';
+import { buildFreeSession, blockGuide, repTarget, durationsFor, PLACES, EQUIP, MACHINES, DEFAULT_EQUIP, GOALS_LIBRE } from './libre.js';
 import { badges, newBadges, weekStreak } from './rewards.js';
 import { howto } from './coaching.js';
 
@@ -585,7 +585,9 @@ function libreOpts() {
   const o = state.libre || {};
   const place = o.place || 'salle';
   return {
-    goal: o.goal || 'mixte', place, minutes: o.minutes || 30,
+    goal: o.goal || 'mixte', place,
+    // Durée ramenée au maximum de l'objectif (ex. 90 min choisi en cardio, puis passage en renfo).
+    minutes: Math.min(o.minutes || 30, Math.max(...durationsFor(o.goal || 'mixte'))),
     equip: o.equip || [...DEFAULT_EQUIP[place]], seed: o.seed || 0,
     level: p.level, lowImpact: bodyMetrics(p).bmi >= 30,
   };
@@ -604,7 +606,8 @@ function renderLibre() {
       <label class="field"><span>Où ?</span><div class="chips">${Object.entries(PLACES).map(([k, [l, ic]]) => chip('place', k, o.place === k, `${ic} ${l}`)).join('')}</div></label>
       <label class="field"><span>Ton matériel</span><div class="chips">${equipKeys.map((k) => chip('equip', k, o.equip.includes(k), EQUIP[k])).join('')}</div>
         <small class="muted">${o.equip.length ? '' : 'Rien de coché : séance 100 % poids du corps.'}</small></label>
-      <label class="field"><span>Durée</span><div class="chips">${DURATIONS.map((m) => chip('minutes', m, o.minutes === m, `${m} min`)).join('')}</div></label>
+      <label class="field"><span>Durée</span><div class="chips">${durationsFor(o.goal).map((m) => chip('minutes', m, o.minutes === m, m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? String(m % 60).padStart(2, '0') : ''}`)).join('')}</div>
+        ${o.goal === 'cardio' && o.minutes >= 60 ? '<small class="muted">Séance longue : un bloc d’endurance à allure modérée, puis des intervalles.</small>' : ''}</label>
     </div>
     <div class="card hero">
       <div class="row between"><div class="eyebrow">Ta séance</div><span class="pill">≈ ${Math.round(plan.seconds / 60)} min</span></div>
@@ -639,7 +642,11 @@ function freeVideo(id, name) {
 }
 // Fiche dépliable d'un exercice dans l'aperçu : photos, consigne, repères et vidéo, comme en muscu.
 function freeExercisePreview(e, num, b) {
-  const dose = b.type === 'machine' ? `${b.work} s fort / ${b.rest} s facile` : `${b.work} s`;
+  const level = state.profile.level;
+  const t = repTarget(e.id, b.work, level);
+  const dose = b.type === 'machine' ? `${b.work} s fort / ${b.rest} s facile`
+    : b.type === 'endurance' ? `${b.exercises.length > 1 ? 5 * Math.ceil(b.rounds / b.exercises.length) : 5 * b.rounds} min`
+      : `${b.work} s${t.reps ? ` · ${t.text}` : ''}`;
   const video = `<a class="btn ghost sm" href="${freeVideo(e.id, e.name)}" target="_blank" rel="noopener">▶ Vidéo</a>`;
   const media = e.anim
     ? `<figure class="ex-media anim"><img src="media/anim/${e.anim}.svg" alt="${esc(e.name)}, mouvement animé" loading="lazy"><figcaption><span class="lbl">Mouvement</span>${video}</figcaption></figure>`
@@ -769,6 +776,8 @@ function paintPlayer(full) {
       <div class="small muted">${st.kind === 'work' ? (st.phase === 'main' ? 'Effort' : '') : 'Récupération'}</div>
       <div class="pclock" id="pclock">${clock}</div>
       <h1 style="margin:4px 0 6px">${esc(st.label)}</h1>
+      ${st.kind === 'work' && st.phase === 'main' && st.exId && !st.exId.startsWith('m-') && st.secs < 300
+        ? `<div class="target">${(() => { const t = repTarget(st.exId, st.secs, state.profile.level); return t.reps ? `Objectif : <b>${esc(t.text)}</b>` : `<b>${esc(t.text[0].toUpperCase() + t.text.slice(1))}</b>`; })()}</div>` : ''}
       <p class="muted small" style="margin:0 0 12px">${esc(st.cue || '')}</p>
       ${st.kind === 'work' && st.exId ? `<div class="small muted" style="text-align:left;margin:0 auto 12px;max-width:420px">${howtoBlock(st.exId)}</div>` : ''}
       ${freeMedia(st, ph)}
