@@ -77,3 +77,22 @@ test('chaque exercice a ses repères (sentir, ralentir, temps fort)', () => {
     assert.ok(h && h.length === 3 && h.every((x) => x && x.length), `${e.id} sans repères`);
   }
 });
+
+test('chaque exercice libre a une image affichée dans l’appli (photo ou animation)', async () => {
+  const fs = await import('node:fs');
+  const root = new URL('../media/', import.meta.url);
+  for (const e of FREE) {
+    assert.ok(e.photo || e.anim, `${e.id} sans image`);
+    if (e.photo) for (const k of [0, 1]) assert.ok(fs.existsSync(new URL(`${e.photo}_${k}.jpg`, root)), `${e.photo}_${k}.jpg manquant`);
+    if (e.anim) assert.ok(fs.existsSync(new URL(`anim/${e.anim}.svg`, root)), `anim/${e.anim}.svg manquant`);
+  }
+});
+
+test('mode d’emploi de chaque bloc : clair et cohérent avec la séance', async () => {
+  const { blockGuide } = await import('../js/libre.js');
+  for (const o of allCases()) for (const b of buildFreeSession(o, 5).blocks) {
+    const g = blockGuide(b);
+    assert.ok(g.text.length > 30 && g.minutes >= 1, b.name);
+    if (b.type === 'force' || b.type === 'cardio') assert.match(g.text, new RegExp(`${b.work} s`));
+  }
+});

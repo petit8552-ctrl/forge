@@ -25,6 +25,7 @@ export const DURATIONS = [15, 20, 30, 45];
 // kind : force | cardio · group : jambes | poussee | tirage | gainage | complet
 // impact : high = sauts (déconseillé débutant / IMC élevé) · outdoor : besoin d'espace (dehors, plage)
 // photo : nom dans Free Exercise DB (domaine public), null si l'exercice n'y figure pas.
+// anim  : silhouette animée maison (media/anim/<id>.svg) pour les exercices sans photo.
 export const FREE = [
   // Jambes
   { id: 'l-squat', name: 'Squat au poids du corps', kind: 'force', group: 'jambes', impact: 'low', diff: 1, photo: 'Bodyweight_Squat', cue: 'Fesses en arrière, talons au sol, descends cuisses parallèles.' },
@@ -59,10 +60,10 @@ export const FREE = [
   { id: 'l-flutter', name: 'Battements de jambes', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Flutter_Kicks', cue: 'Bas du dos collé au sol, petits battements.' },
   { id: 'l-mountain', name: 'Mountain climbers', kind: 'cardio', group: 'gainage', impact: 'low', diff: 1, photo: 'Mountain_Climbers', cue: 'Position de pompe, genoux vers la poitrine en alternance, rapide.' },
   // Cardio complet
-  { id: 'l-burpees', name: 'Burpees', kind: 'cardio', group: 'complet', impact: 'high', diff: 2, photo: null, cue: 'Squat, mains au sol, pieds en arrière, pompe (facultatif), pieds vers les mains, saut.' },
-  { id: 'l-jacks', name: 'Jumping jacks', kind: 'cardio', group: 'complet', impact: 'high', diff: 1, photo: null, cue: 'Saute en écartant bras et jambes, reviens pieds joints.' },
-  { id: 'l-pas-chasses', name: 'Pas chassés', kind: 'cardio', group: 'complet', impact: 'low', diff: 1, photo: null, cue: 'Déplacements latéraux rapides, genoux fléchis, sans croiser les pieds.' },
-  { id: 'l-genoux-hauts', name: 'Montées de genoux', kind: 'cardio', group: 'complet', impact: 'low', diff: 1, photo: null, cue: 'Sur place, genoux à hauteur de hanche, bras actifs.' },
+  { id: 'l-burpees', name: 'Burpees', kind: 'cardio', group: 'complet', impact: 'high', diff: 2, photo: null, anim: 'l-burpees', cue: 'Squat, mains au sol, pieds en arrière, pompe (facultatif), pieds vers les mains, saut.' },
+  { id: 'l-jacks', name: 'Jumping jacks', kind: 'cardio', group: 'complet', impact: 'high', diff: 1, photo: null, anim: 'l-jacks', cue: 'Saute en écartant bras et jambes, reviens pieds joints.' },
+  { id: 'l-pas-chasses', name: 'Pas chassés', kind: 'cardio', group: 'complet', impact: 'low', diff: 1, photo: null, anim: 'l-pas-chasses', cue: 'Déplacements latéraux rapides, genoux fléchis, sans croiser les pieds.' },
+  { id: 'l-genoux-hauts', name: 'Montées de genoux', kind: 'cardio', group: 'complet', impact: 'low', diff: 1, photo: null, anim: 'l-genoux-hauts', cue: 'Sur place, genoux à hauteur de hanche, bras actifs.' },
   { id: 'l-inchworm', name: 'Inchworm', kind: 'cardio', group: 'complet', impact: 'low', diff: 1, photo: 'Inchworm', cue: 'Mains au sol, avance en planche, reviens en marchant les pieds.' },
   { id: 'l-tuck', name: 'Sauts genoux poitrine', kind: 'cardio', group: 'complet', impact: 'high', diff: 3, photo: 'Knee_Tuck_Jump', cue: 'Saute en ramenant les genoux, réception souple.' },
   { id: 'l-patineur', name: 'Sauts du patineur', kind: 'cardio', group: 'complet', impact: 'high', diff: 2, photo: 'Lateral_Bound', cue: 'Bonds latéraux d’une jambe sur l’autre, stabilise 1 s.' },
@@ -72,7 +73,7 @@ export const FREE = [
   // Besoin d'espace : plein air et plage (sur le sable, l'effort double)
   { id: 'l-sprint', name: 'Sprint', kind: 'cardio', group: 'complet', impact: 'high', diff: 1, outdoor: true, photo: 'Wind_Sprints', cue: '20 à 30 m à fond, retour en marchant.' },
   { id: 'l-saut-longueur', name: 'Sauts en longueur', kind: 'cardio', group: 'jambes', impact: 'high', diff: 2, outdoor: true, photo: 'Standing_Long_Jump', cue: 'Pieds joints, élan des bras, réception genoux fléchis.' },
-  { id: 'l-ours', name: 'Marche de l’ours', kind: 'cardio', group: 'complet', impact: 'low', diff: 2, outdoor: true, photo: null, cue: 'À quatre pattes, genoux décollés, avance main/pied opposés.' },
+  { id: 'l-ours', name: 'Marche de l’ours', kind: 'cardio', group: 'complet', impact: 'low', diff: 2, outdoor: true, photo: null, anim: 'l-ours', cue: 'À quatre pattes, genoux décollés, avance main/pied opposés.' },
 ];
 
 // Cardio sur machine : intervalles (effort / récupération active).
@@ -230,6 +231,32 @@ export function buildFreeSession(opts, seed = 0) {
   };
 }
 
+// Où on en est dans le bloc, affiché pendant la séance.
+function stepPos(b, r, k) {
+  if (b.type === 'tabata') return `Série ${r * 2 + k + 1}/8`;
+  if (b.type === 'machine' || b.type === 'finisher') return `Série ${r + 1}/${b.rounds}`;
+  return `Exo ${k + 1}/${b.perRound} · Tour ${r + 1}/${b.rounds}`;
+}
+
+// Mode d'emploi d'un bloc, en clair : quoi faire, combien de temps, quand récupérer, quand recommencer.
+export function blockGuide(b) {
+  const min = Math.max(1, Math.round(b.seconds / 60));
+  const n = b.exercises.length;
+  if (b.type === 'tabata') {
+    return { minutes: min, text: `Alterne les 2 exercices : ${b.work} s à fond, ${b.rest} s de repos, 8 fois de suite (1, 2, 1, 2…). Pas de pause entre les séries : c’est court mais intense.` };
+  }
+  if (b.type === 'machine') {
+    return { minutes: min, text: `Sur le ${b.exercises[0].name.toLowerCase()}, sans descendre : ${b.work} s d’effort fort, puis ${b.rest} s à allure facile. Répète ${b.rounds} fois.` };
+  }
+  if (b.type === 'finisher') {
+    return { minutes: min, text: `Un seul exercice pour finir : ${b.work} s d’effort, ${b.rest} s de repos, ${b.rounds} fois.` };
+  }
+  const tours = b.rounds > 1
+    ? `Après le n°${n}, 1 min de pause, puis recommence au n°1. ${b.rounds} tours en tout.`
+    : 'Un seul tour.';
+  return { minutes: min, text: `Fais les ${n} exercices dans l’ordre : ${b.work} s d’effort chacun, ${b.rest} s de récup entre deux. ${tours}` };
+}
+
 // Transforme les blocs en suite d'étapes chronométrées, échauffement et retour au calme compris.
 export function toSteps(blocks, warmSteps = 5, coolSteps = 3) {
   const steps = [];
@@ -242,7 +269,7 @@ export function toSteps(blocks, warmSteps = 5, coolSteps = 3) {
         const e = b.exercises[k % b.exercises.length];
         const machine = b.type === 'machine' && MACHINE_CARDIO[b.machine];
         steps.push({ phase: 'main', kind: 'work', label: machine ? `${e.name} : effort` : e.name, cue: machine ? machine.work : e.cue,
-          exId: e.id, photo: e.photo, secs: b.work, block: b.name, pos: `Tour ${r + 1}/${b.rounds}` });
+          exId: e.id, photo: e.photo, anim: e.anim, secs: b.work, block: b.name, pos: stepPos(b, r, k) });
         const last = r === b.rounds - 1 && k === b.perRound - 1;
         if (last) continue;
         if (k === b.perRound - 1 && b.roundRest) steps.push({ phase: 'main', kind: 'rest', label: 'Fin du tour', cue: 'Respire, bois une gorgée.', secs: b.roundRest, block: b.name });

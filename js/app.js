@@ -6,7 +6,7 @@ import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { BY_ID, PATTERN_LABEL } from './exercises.js';
 import { photos, videoUrl } from './media.js';
 import * as Sync from './sync.js';
-import { buildFreeSession, PLACES, EQUIP, MACHINES, DEFAULT_EQUIP, GOALS_LIBRE, DURATIONS } from './libre.js';
+import { buildFreeSession, blockGuide, PLACES, EQUIP, MACHINES, DEFAULT_EQUIP, GOALS_LIBRE, DURATIONS } from './libre.js';
 import { badges, newBadges, weekStreak } from './rewards.js';
 import { howto } from './coaching.js';
 
@@ -610,9 +610,13 @@ function renderLibre() {
       <div class="row between"><div class="eyebrow">Ta séance</div><span class="pill">≈ ${Math.round(plan.seconds / 60)} min</span></div>
       <h2 style="margin:6px 0 10px">${esc(plan.title)}</h2>
       <div class="tip small"><div>Échauffement · ${plan.steps.filter((x) => x.phase === 'warmup').length} min</div></div>
-      ${plan.blocks.map((b) => `<div class="tip small"><div><b>${esc(b.name)}</b> · ${b.type === 'machine' ? `${b.rounds} × (${b.work} s effort / ${b.rest} s récup)` : b.type === 'tabata' ? '8 × (20 s / 10 s)' : `${b.rounds} tour${b.rounds > 1 ? 's' : ''} · ${b.work} s / ${b.rest} s`}
-        <div class="freeex-list">${b.exercises.map(freeExercisePreview).join('')}</div></div></div>`).join('')}
-      <p class="small muted" style="margin:8px 0 0">Touche un exercice pour voir les photos, les consignes et la vidéo.</p>
+      ${plan.blocks.map((b) => {
+        const g = blockGuide(b);
+        return `<div class="tip small"><div><b>${esc(b.name)}</b> · ${g.minutes} min
+          <p class="guide">${esc(g.text)}</p>
+          <div class="freeex-list">${b.exercises.map((e, i) => freeExercisePreview(e, i + 1, b)).join('')}</div></div></div>`;
+      }).join('')}
+      <p class="small muted" style="margin:8px 0 0">Pas besoin de chrono : une fois démarrée, l’appli te dit quoi faire et bipe à chaque changement. Touche un exercice pour voir le mouvement.</p>
       <div class="tip small"><div>Retour au calme · ${plan.steps.filter((x) => x.phase === 'cooldown').length} min</div></div>
       <div class="row" style="margin-top:12px"><button class="btn ghost" id="reroll" style="flex:1">↻ Autre séance</button><button class="btn primary" id="go" style="flex:1">▶ Démarrer</button></div>
     </div>`;
@@ -634,15 +638,18 @@ function freeVideo(id, name) {
   return id && id.startsWith('m-') ? videoUrl(`${name} intervalles`, 'machine') : videoUrl(name, 'libre');
 }
 // Fiche dépliable d'un exercice dans l'aperçu : photos, consigne, repères et vidéo, comme en muscu.
-function freeExercisePreview(e) {
+function freeExercisePreview(e, num, b) {
+  const dose = b.type === 'machine' ? `${b.work} s fort / ${b.rest} s facile` : `${b.work} s`;
   const video = `<a class="btn ghost sm" href="${freeVideo(e.id, e.name)}" target="_blank" rel="noopener">▶ Vidéo</a>`;
-  const media = e.photo
+  const media = e.anim
+    ? `<figure class="ex-media anim"><img src="media/anim/${e.anim}.svg" alt="${esc(e.name)}, mouvement animé" loading="lazy"><figcaption><span class="lbl">Mouvement</span>${video}</figcaption></figure>`
+    : e.photo
     ? `<figure class="ex-media" data-media>
         <img src="media/${e.photo}_0.jpg" alt="${esc(e.name)}, départ" loading="lazy" decoding="async">
         <img src="media/${e.photo}_1.jpg" alt="${esc(e.name)}, arrivée" loading="lazy" decoding="async" class="end">
         <figcaption><span class="lbl">Départ ⇄ arrivée</span>${video}</figcaption></figure>`
     : `<div class="ex-media-actions">${video}</div>`;
-  return `<details class="freeex"><summary>${esc(e.name)}</summary>
+  return `<details class="freeex"><summary><span><span class="num">${num}</span>${esc(e.name)}</span><span class="muted small dose">${dose}</span></summary>
     ${media}<div class="ex-cue">${esc(e.cue || '')}${howtoBlock(e.id)}</div></details>`;
 }
 
@@ -651,6 +658,7 @@ function freeMedia(st, ph) {
   if (st.kind !== 'work' || !st.exId) return '';
   const name = st.label.replace(/ : effort$/, '');
   const video = `<a class="btn ghost sm" data-pvideo href="${freeVideo(st.exId, name)}" target="_blank" rel="noopener">▶ Vidéo</a>`;
+  if (st.anim) return `<figure class="ex-media anim"><img src="media/anim/${st.anim}.svg" alt="${esc(name)}, mouvement animé"><figcaption><span class="lbl">Mouvement</span>${video}</figcaption></figure>`;
   if (!ph) return `<div class="ex-media-actions" style="text-align:center">${video}</div>`;
   return `<figure class="ex-media" data-media>
       <img src="${ph.start}" alt="${esc(name)}, départ"><img src="${ph.end}" alt="${esc(name)}, arrivée" class="end">
