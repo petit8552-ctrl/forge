@@ -71,10 +71,10 @@ test('cardio débutant sans machine : que des blocs cardio', () => {
   assert.ok(s.blocks.filter((b) => b.type !== 'finisher').every((b) => b.type === 'cardio'), s.blocks.map((b) => b.type).join());
 });
 
-test('chaque exercice a ses repères (sentir, ralentir, temps fort)', () => {
+test('chaque exercice a ses 3 repères remplis (sentir, ralentir, bloquer)', () => {
   for (const e of [...EXERCISES, ...FREE]) {
     const h = HOWTO[e.id];
-    assert.ok(h && h.length === 3 && h.every((x) => x && x.length), `${e.id} sans repères`);
+    assert.ok(h && h.length === 3 && h.every((x) => x && x.length > 2), `${e.id} sans repères complets`);
   }
 });
 
@@ -119,4 +119,13 @@ test('objectif de reps : cohérent avec la durée et le niveau ; au temps pour l
   assert.ok(repTarget('l-squat', 40, 'avance').reps[1] > repTarget('l-squat', 20, 'avance').reps[1]);
   assert.equal(repTarget('l-planche', 40).reps, null);
   assert.equal(repTarget('l-corde', 40).reps, null);
+});
+
+test('chaque exercice libre a un objectif de reps, sauf ceux qui se font vraiment à la durée', async () => {
+  const { TIMED_FREE } = await import('../js/libre.js');
+  for (const e of FREE) {
+    const t = repTarget(e.id, 40, 'intermediaire');
+    if (TIMED_FREE.includes(e.id)) assert.equal(t.reps, null, `${e.id} devrait être au temps`);
+    else assert.ok(t.reps, `${e.id} sans objectif de reps`);
+  }
 });

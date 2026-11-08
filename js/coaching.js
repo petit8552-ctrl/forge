@@ -1,4 +1,4 @@
-// Repères d'exécution par exercice : où sentir le travail, quelle phase ralentir, où marquer un temps.
+// Repères d'exécution par exercice : où sentir le travail, quelle phase ralentir, où bloquer.
 // [sentir, ralentir, bloquer]. Règle générale : on descend (ou on étire) lentement, on remonte franchement.
 // Sur les gros mouvements lourds, pas de pause imposée : on contrôle le point bas sans rebondir.
 export const HOWTO = {
@@ -72,12 +72,12 @@ export const HOWTO = {
   'overhead-cable': ['Triceps, étirement.', 'Retour en 3 s.', '1 s bras tendus.'],
   'close-bench': ['Triceps, pectoraux.', 'Descente en 3 s.', 'Touche la poitrine sans rebondir.'],
   // Gainage
-  plank: ['Abdos et fessiers.', '—', 'Tiens la position, respire normalement.'],
+  plank: ['Abdos et fessiers.', 'Respiration lente : 3 s inspire, 3 s expire.', 'Toute la durée : bassin aligné, fessiers serrés, sans creuser le dos.'],
   'hanging-raise': ['Bas des abdos.', 'Descente en 3 s.', '1 s en haut, bassin enroulé.'],
   'cable-crunch': ['Abdos (enroulement).', 'Remontée en 2 s.', '1 s enroulé en bas.'],
   'ab-wheel': ['Abdos (très intense).', 'Aller en 3 s.', 'Arrête-toi avant que le dos se creuse.'],
   pallof: ['Abdos (côtés).', 'Retour en 2 s.', '2 s bras tendus, résiste à la rotation.'],
-  'side-plank': ['Côté des abdos.', '—', 'Tiens, hanches hautes.'],
+  'side-plank': ['Côté des abdos.', 'Respiration lente et régulière.', 'Toute la durée : hanches hautes, corps aligné.'],
   'dead-bug': ['Abdos profonds.', 'Chaque bras / jambe en 3 s.', '1 s en extension, dos plaqué.'],
 
   // Séance libre
@@ -103,8 +103,8 @@ export const HOWTO = {
   'l-rowing-halteres': ['Dos (sous l’aisselle).', 'Descente en 2 s.', '1 s coude en haut.'],
   'l-ecartes-elastique': ['Arrière des épaules, haut du dos.', 'Retour en 2 s.', '1 s bras ouverts.'],
   'l-superman': ['Bas du dos, fessiers.', 'Descente en 2 s.', '2 s décollé.'],
-  'l-planche': ['Abdos, fessiers.', '—', 'Tiens, respire.'],
-  'l-planche-lat': ['Côté des abdos.', '—', 'Tiens, hanches hautes.'],
+  'l-planche': ['Abdos, fessiers.', 'Respiration lente : 3 s inspire, 3 s expire.', 'Toute la durée : bassin aligné, fessiers serrés.'],
+  'l-planche-lat': ['Côté des abdos.', 'Respiration lente et régulière.', 'Toute la durée : hanches hautes, corps aligné.'],
   'l-crunch-velo': ['Abdos (côtés).', 'Lentement, 2 s par côté.', 'Coude contre genou 1 s.'],
   'l-russian': ['Abdos (côtés).', 'Rotation contrôlée.', 'Pas d’élan.'],
   'l-flutter': ['Bas des abdos.', 'Petits battements réguliers.', 'Dos collé au sol tout du long.'],
