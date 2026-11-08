@@ -177,21 +177,22 @@ export function buildTargeted(p, opts, history = [], seed = 0) {
       const sc = schemeFor(e, isFirst, p.level);
       const cost = sc[0] * setSeconds(sc[4]) + 60;
       if (used + cost > budget || sets + sc[0] > m.cap) continue;
-      taken.add(e.id); z.picked.push({ e, sc }); used += cost; sets += sc[0]; added = true;
+      taken.add(e.id); z.picked.push({ e, sc, pass }); used += cost; sets += sc[0]; added = true;
     }
     if (!added) break;
   }
   // Composés avant isolation à l'intérieur de la séance : on garde l'ordre des zones, qui va déjà du lourd au léger.
   let slot = 0;
-  const outZones = zones.map((z) => ({
+  const outZones = zones.map((z, zi) => ({
     zone: z.zone,
     missing: z.cands.length ? null : missingFor(z.zone, opts.equip || []),
-    exercises: z.picked.map(({ e, sc }) => {
+    exercises: z.picked.map(({ e, sc, pass }) => {
       const sug = suggestLoad(e, p, history, sc, 'acc');
       const pool = z.cands.length;
       return {
         slot: slot++, role: slot === 1 ? 'main' : e.kind === 'compound' ? 'sec' : 'acc', pattern: e.pattern,
         id: e.id, name: e.name, cue: e.cue, unit: e.unit, timed: !!e.timed, zone: z.zone.id, anim: e.anim,
+        muscle: opts.muscle, kind: e.kind, rank: pass * 10 + zi,
         subtitle: z.zone.name, sets: sc[0], repsMin: sc[1], repsMax: sc[2], rir: sc[3], rest: sc[4],
         load: sug.load, loadNote: e.unit === 'pdc' && !e.coef
           ? (e.needs?.includes('elastique') ? 'Élastique : choisis une tension qui t’amène près de l’échec dans la fourchette.' : 'Au-delà de 20 reps faciles, passe à la variante plus dure (⇄).')
@@ -209,10 +210,70 @@ export function buildTargeted(p, opts, history = [], seed = 0) {
   };
 }
 
+// Superset : deux muscles, exercices en paires A/B enchaînés sans pause, repos après la paire.
+// Le temps gagné sur les repos permet plus d'exercices dans la même durée.
+export const SUPERSET_TRANSITION = 15; // secondes pour passer de A à B
+export const CLASSIC_PAIRS = [['pecs', 'dos'], ['biceps', 'triceps'], ['jambes', 'epaules'], ['pecs', 'biceps'], ['dos', 'triceps']];
+
+export function buildSuperset(p, opts, history = [], seed = 0) {
+  const [ma, mb] = opts.muscles;
+  // Tous les exercices possibles pour chaque muscle (dans la limite de séries), dans l'ordre de priorité.
+  const pick = (muscle) => buildTargeted(p, { ...opts, muscle, minutes: 240 }, history, seed).exercises
+    .slice().sort((x, y) => x.rank - y.rank);
+  const A = pick(ma); const B = pick(mb);
+  const budget = (opts.minutes - 5) * 60 - 180; // échauffement + séries d'approche
+  const capA = MUSCLES[ma].cap; const capB = MUSCLES[mb].cap;
+  let used = 0; let setsA = 0; let setsB = 0;
+  const pairs = []; const solo = [];
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const a = A[i]; const b = B[i];
+    if (a && b) {
+      // Repos après la paire : celui du plus exigeant des deux, un peu raccourci (les muscles alternent).
+      const rest = Math.max(a.rest, b.rest) >= 120 ? 120 : 90;
+      const costOf = (n) => n * (45 + SUPERSET_TRANSITION + 45 + rest) + 90;
+      // Si la paire ne tient pas en entier, on tente une version à 2 tours pour coller au temps demandé.
+      let sets = Math.min(a.sets, b.sets);
+      while (sets > 2 && (used + costOf(sets) > budget || setsA + sets > capA || setsB + sets > capB)) sets--;
+      if (used + costOf(sets) > budget || setsA + sets > capA || setsB + sets > capB) break;
+      pairs.push({ a, b, sets, rest }); used += costOf(sets); setsA += sets; setsB += sets;
+    } else {
+      const x = a || b;
+      const cost = x.sets * (45 + x.rest) + 60;
+      const isA = !!a;
+      if (used + cost > budget || (isA ? setsA + x.sets > capA : setsB + x.sets > capB)) break;
+      solo.push(x); used += cost; if (isA) setsA += x.sets; else setsB += x.sets;
+    }
+  }
+  // Les paires restent dans l'ordre de priorité, qui va déjà du lourd au léger pour chaque muscle.
+  let slot = 0;
+  const zoneName = (x) => MUSCLES[x.muscle].zones.find((z) => z.id === x.zone).name;
+  const mk = (x, extra) => ({ ...x, slot: slot++, poolSize: x.poolSize, ...extra });
+  const zones = pairs.map((pr, i) => {
+    const a = mk(pr.a, { sets: pr.sets, rest: SUPERSET_TRANSITION, superset: 'A', restLabel: 'Enchaîne avec B', subtitle: `A${i + 1} · ${MUSCLES[pr.a.muscle].name} — ${zoneName(pr.a)}`, role: i === 0 ? 'main' : pr.a.role });
+    const b = mk(pr.b, { sets: pr.sets, rest: pr.rest, superset: 'B', subtitle: `B${i + 1} · ${MUSCLES[pr.b.muscle].name} — ${zoneName(pr.b)}`, role: i === 0 ? 'main' : pr.b.role });
+    return {
+      zone: { id: `ss${i + 1}`, name: `Superset ${i + 1}`, desc: `${pr.sets} tours : ${pr.a.name}, puis tout de suite ${pr.b.name}. Repos ${pr.rest >= 120 ? '2 min' : '1 min 30'} après la paire.` },
+      exercises: [a, b],
+    };
+  });
+  if (solo.length) {
+    zones.push({ zone: { id: 'solo', name: 'Séries classiques', desc: 'Exercices sans partenaire de superset : repos normal entre les séries.' },
+      exercises: solo.map((x) => mk(x, { subtitle: `${MUSCLES[x.muscle].name} — ${zoneName(x)}` })) });
+  }
+  const exercises = zones.flatMap((z) => z.exercises);
+  const minutes = Math.round((used + 480) / 60);
+  return {
+    mode: 'superset', muscles: [ma, mb], muscle: ma, place: opts.place, requested: opts.minutes,
+    title: `${MUSCLES[ma].name} + ${MUSCLES[mb].name} · superset`,
+    zones, exercises, minutes, sets: setsA + setsB, pairs: pairs.length,
+    capped: (setsA >= capA - 3 || setsB >= capB - 3) && minutes < opts.minutes - 5,
+  };
+}
+
 // Variante : exercice suivant de la même zone, pas déjà dans la séance.
 export function nextInZone(session, slot, opts, p) {
   const ex = session.exercises.find((x) => x.slot === slot);
-  const zone = MUSCLES[session.muscle].zones.find((z) => z.id === ex.zone);
+  const zone = MUSCLES[ex.muscle || session.muscle].zones.find((z) => z.id === ex.zone);
   const cands = zoneCandidates(zone, { ...opts, level: p.level });
   const used = new Set(session.exercises.map((x) => x.id));
   const start = cands.findIndex((c) => c.id === ex.id);
@@ -227,9 +288,10 @@ export function nextInZone(session, slot, opts, p) {
 export function swapExercise(session, slot, next, p, history) {
   const ex = session.exercises.find((x) => x.slot === slot);
   const sc = schemeFor(next, ex.role === 'main', p.level);
+  if (ex.superset) { sc[0] = ex.sets; sc[4] = ex.rest; } // en superset : séries et repos fixés par la paire
   const sug = suggestLoad(next, p, history, sc, 'acc');
   Object.assign(ex, {
-    id: next.id, name: next.name, cue: next.cue, unit: next.unit, pattern: next.pattern, anim: next.anim,
+    id: next.id, name: next.name, cue: next.cue, unit: next.unit, pattern: next.pattern, anim: next.anim, kind: next.kind,
     sets: sc[0], repsMin: sc[1], repsMax: sc[2], rir: sc[3], rest: sc[4], load: sug.load,
     loadNote: next.unit === 'pdc' && !next.coef ? 'Poids du corps ou élastique : vise la fourchette, proche de l’échec.' : sug.note,
   });
