@@ -18,12 +18,14 @@ export const DEFAULT_EQUIP = {
   maison: [], dehors: ['barre', 'banc'], plage: [],
 };
 export const GOALS_LIBRE = {
-  cardio: ['Cardio', 'Souffle, brûler'], muscu: ['Renfo', 'Muscles, circuit'], mixte: ['Mixte', 'Les deux'],
+  cardio: ['Cardio', 'Souffle, brûler'], abdos: ['Abdos', 'Sangle abdominale'], muscu: ['Renfo', 'Muscles, circuit'], mixte: ['Mixte', 'Les deux'],
 };
 export const DURATIONS = [15, 20, 30, 45, 60, 75, 90];
 // Durées proposées selon l'objectif : jusqu'à 1 h 30 en cardio (endurance + intervalles),
 // 1 h en renfo ou mixte (au-delà, un circuit au poids du corps n'apporte plus grand-chose).
 export function durationsFor(goal) {
+  // Abdos : au-delà de 30 min, on répète les mêmes exercices sans bénéfice.
+  if (goal === 'abdos') return [15, 20, 30];
   return DURATIONS.filter((m) => m <= (goal === 'cardio' ? 90 : 60));
 }
 
@@ -63,6 +65,16 @@ export const FREE = [
   { id: 'l-crunch-velo', name: 'Crunch bicyclette', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Air_Bike', cue: 'Coude vers genou opposé, lentement.' },
   { id: 'l-russian', name: 'Russian twist', kind: 'force', group: 'gainage', impact: 'low', diff: 2, photo: 'Russian_Twist', cue: 'Pieds décollés si possible, tourne les épaules.' },
   { id: 'l-flutter', name: 'Battements de jambes', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Flutter_Kicks', cue: 'Bas du dos collé au sol, petits battements.' },
+  { id: 'l-crunch', name: 'Crunch', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Crunches', cue: 'Bas du dos au sol, enroule le haut du buste, mains aux tempes sans tirer la nuque.' },
+  { id: 'l-crunch-inverse', name: 'Crunch inversé', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Reverse_Crunch', cue: 'Genoux pliés, décolle le bassin du sol en ramenant les genoux vers la poitrine.' },
+  { id: 'l-genoux-poitrine', name: 'Genoux-poitrine assis', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Leg_Pull-In', cue: 'Assis, mains derrière, ramène les genoux vers la poitrine puis tends les jambes.' },
+  { id: 'l-oblique', name: 'Crunch oblique', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Oblique_Crunches_-_On_The_Floor', cue: 'Sur le côté, genoux pliés, monte l’épaule vers la hanche. Change de côté à mi-temps.' },
+  { id: 'l-toe-touch', name: 'Touchers de pieds', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Toe_Touchers', cue: 'Jambes tendues vers le plafond, monte les mains vers les pieds.' },
+  { id: 'l-dead-bug', name: 'Dead bug', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Dead_Bug', cue: 'Dos plaqué au sol, tends bras et jambe opposés lentement.' },
+  { id: 'l-sit-up', name: 'Sit-up', kind: 'force', group: 'gainage', impact: 'low', diff: 2, photo: '3_4_Sit-Up', cue: 'Pieds au sol, enroule le buste jusqu’à la verticale, redescends lentement.' },
+  { id: 'l-jackknife', name: 'Jackknife', kind: 'force', group: 'gainage', impact: 'low', diff: 3, photo: 'Jackknife_Sit-Up', cue: 'Allongé, monte bras et jambes tendus en même temps pour te toucher les pieds.' },
+  { id: 'l-releve-suspendu', name: 'Relevés de jambes suspendu', kind: 'force', group: 'gainage', equip: 'barre', impact: 'low', diff: 2, photo: 'Hanging_Leg_Raise', cue: 'Suspendu, monte les genoux (ou jambes tendues) sans balancer.' },
+  { id: 'l-spell', name: 'Rotations haltère', kind: 'force', group: 'gainage', equip: 'halteres', impact: 'low', diff: 2, photo: 'Spell_Caster', cue: 'Haltère à deux mains, passe-le d’une hanche à l’épaule opposée en pivotant.' },
   { id: 'l-mountain', name: 'Mountain climbers', kind: 'cardio', group: 'gainage', impact: 'low', diff: 1, photo: 'Mountain_Climbers', cue: 'Position de pompe, genoux vers la poitrine en alternance, rapide.' },
   // Cardio complet
   { id: 'l-burpees', name: 'Burpees', kind: 'cardio', group: 'complet', impact: 'high', diff: 2, photo: null, anim: 'l-burpees', cue: 'Squat, mains au sol, pieds en arrière, pompe (facultatif), pieds vers les mains, saut.' },
@@ -238,10 +250,11 @@ export function buildFreeSession(opts, seed = 0) {
   }
 
   // Ordre des blocs selon l'objectif (on en prend autant que le temps permet).
-  const plan = opts.goal === 'muscu' ? ['force', 'force', 'force', 'force', 'force']
+  const plan = opts.goal === 'abdos' ? ['abdos', 'abdos', 'abdos', 'abdos']
+    : opts.goal === 'muscu' ? ['force', 'force', 'force', 'force', 'force']
     : opts.goal === 'cardio' ? (machines.length ? ['machine', 'cardio', 'machine', 'cardio', 'tabata'] : ['cardio', 'tabata', 'cardio', 'tabata', 'cardio'])
       : ['force', machines.length ? 'machine' : 'cardio', 'force', 'tabata', 'force'];
-  const nBlocks = Math.max(1, Math.min(plan.length, Math.round(budget / (9 * 60))));
+  const nBlocks = Math.max(1, Math.min(plan.length, Math.round(budget / ((opts.goal === 'abdos' ? 8 : 9) * 60))));
 
   for (const type of plan.slice(0, nBlocks)) {
     if (type === 'machine') {
@@ -250,6 +263,14 @@ export function buildFreeSession(opts, seed = 0) {
       const easy = level === 'debutant' ? 60 : level === 'avance' ? 20 : 30;
       blocks.push({ type, name: `Intervalles ${MACHINE_CARDIO[m].name.toLowerCase()}`, machine: m, work, rest: easy, perRound: 1, roundRest: 0, rounds: 4, maxRounds: 15,
         exercises: [{ id: `m-${m}`, name: MACHINE_CARDIO[m].name, cue: `${MACHINE_CARDIO[m].work}. ${MACHINE_CARDIO[m].easy}.`, photo: MACHINE_CARDIO[m].photo }] });
+    } else if (type === 'abdos') {
+      // Circuit abdos : exercices de la sangle (gainage, enroulements, rotations), sans répétition dans le circuit.
+      const abs = pool.filter((e) => e.group === 'gainage');
+      const fresh = shuffle(abs.filter((e) => !used.has(e.id)), rand);
+      const ex = [...fresh, ...shuffle(abs.filter((e) => used.has(e.id)), rand)].slice(0, n);
+      if (ex.length < 3) continue;
+      ex.forEach((e) => used.add(e.id));
+      blocks.push({ type: 'abdos', name: 'Circuit abdos', work: pace.work, rest: pace.rest, perRound: ex.length, roundRest: 45, rounds: 1, maxRounds: pace.rounds[1] + 1, exercises: ex });
     } else if (type === 'tabata' && level !== 'debutant') {
       const ex = cardioCircuit(pool, rand, used, 2);
       if (ex.length < 2) continue;

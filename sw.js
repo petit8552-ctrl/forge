@@ -1,8 +1,8 @@
 // Service worker : met l'app en cache pour qu'elle fonctionne hors ligne à la salle.
 // Les photos sont mises en cache au fil des séances consultées.
 // À incrémenter à chaque mise en ligne pour que les téléphones jettent l'ancienne version.
-const CACHE = 'forge-v12';
-const FILES = ['./', './index.html', './styles.css', './manifest.json', './icon.svg', './js/app.js', './js/engine.js', './js/exercises.js', './js/media.js', './js/sync.js', './js/config.js', './js/libre.js', './js/rewards.js', './js/coaching.js'];
+const CACHE = 'forge-v13';
+const FILES = ['./', './index.html', './styles.css', './manifest.json', './icon.svg', './js/app.js', './js/engine.js', './js/exercises.js', './js/media.js', './js/sync.js', './js/config.js', './js/libre.js', './js/rewards.js', './js/coaching.js', './js/cible.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
