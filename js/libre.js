@@ -103,7 +103,11 @@ const SEC_PER_REP = {
   'l-dev-elastique': 2.2, 'l-australien': 3, 'l-rowing-halteres': 2.5, 'l-ecartes-elastique': 2.2, 'l-superman': 3,
   'l-crunch-velo': 1.5, 'l-russian': 1.2, 'l-burpees': 3.5, 'l-jacks': 1, 'l-tuck': 2.5, 'l-patineur': 1.5,
   'l-swing': 2, 'l-epaule-jete': 3, 'l-saut-longueur': 5, 'l-inchworm': 6,
+  'l-crunch': 2, 'l-crunch-inverse': 2.5, 'l-genoux-poitrine': 2.5, 'l-oblique': 2, 'l-toe-touch': 2,
+  'l-dead-bug': 3, 'l-sit-up': 3, 'l-jackknife': 3, 'l-releve-suspendu': 3, 'l-spell': 2.5,
 };
+// Exercices qui se font vraiment à la durée (position tenue, déplacement, rythme continu).
+export const TIMED_FREE = ['l-planche', 'l-planche-lat', 'l-flutter', 'l-mountain', 'l-pas-chasses', 'l-genoux-hauts', 'l-corde', 'l-sprint', 'l-ours', 'l-footing', 'l-tractions'];
 const LEVEL_PACE = { debutant: 0.7, intermediaire: 0.85, avance: 1 };
 
 // Objectif affiché pour un effort de `secs` secondes : « ≈ 10–13 reps » ou « au temps ».

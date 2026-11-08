@@ -465,13 +465,13 @@ function exerciseCard(e, i, d, locked) {
   </div>`;
 }
 
-// Repères d'exécution : où sentir, quelle phase ralentir, où marquer un temps.
+// Repères d'exécution : où sentir, quelle phase ralentir, où bloquer.
 function howtoBlock(id) {
   const h = howto(id); if (!h) return '';
   return `<div class="howto">
     <div><span>🎯</span><span><b>Sentir</b> : ${esc(h.feel)}</span></div>
-    ${h.slow !== '—' ? `<div><span>🐢</span><span><b>Ralentir</b> : ${esc(h.slow)}</span></div>` : ''}
-    <div><span>⏸</span><span><b>Temps fort</b> : ${esc(h.hold)}</span></div></div>`;
+    <div><span>🐢</span><span><b>Ralentir</b> : ${esc(h.slow)}</span></div>
+    <div><span>⏸</span><span><b>Bloquer</b> : ${esc(h.hold)}</span></div></div>`;
 }
 
 // Photos départ / arrivée en fondu alterné : on voit le mouvement et la machine.
