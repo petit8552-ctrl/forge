@@ -9,7 +9,9 @@ import * as Sync from './sync.js';
 import { buildFreeSession, blockGuide, repTarget, durationsFor, PLACES, EQUIP, MACHINES, DEFAULT_EQUIP } from './libre.js';
 import { badges, newBadges, weekStreak } from './rewards.js';
 import { howto } from './coaching.js';
-import { buildTargeted, buildSuperset, nextInZone, swapExercise, MUSCLES, CIBLE_EQUIP, CIBLE_DURATIONS, CIBLE_DEFAULT_EQUIP, CLASSIC_PAIRS } from './cible.js';
+import { migrateIds } from './ids.js';
+import { setVolume, setE1rm, isRealSession, perDumbbell } from './stats.js';
+import { buildTargeted, buildSuperset, nextInZone, swapExercise, MUSCLES, CIBLE_EQUIP, CIBLE_DURATIONS, CIBLE_DEFAULT_EQUIP, CLASSIC_PAIRS, primaryMuscle, recentMuscles, adjustText } from './cible.js';
 
 // ---------- État persistant ----------
 const KEY = 'forge.v1';
@@ -17,6 +19,13 @@ function load() {
   try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
 }
 const state = Object.assign({ profile: null, history: [], weights: [], drafts: {}, deleted: [], health: [] }, load());
+// Anciens identifiants d'exercices (doublons entre volets) → identifiant unique.
+function migrateState() {
+  const a = migrateIds(state.history);
+  const b = state.cible?.active ? migrateIds([state.cible.active]) : false;
+  if (a || b) saveLocal();
+}
+migrateState();
 function saveLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* stockage indisponible */ } }
 function save() { saveLocal(); Sync.schedule(); }
 const touchProfile = () => { if (state.profile) state.profile.updatedAt = new Date().toISOString(); };
@@ -75,6 +84,7 @@ function route() {
   if (page === 'session') return renderSession(+a, +b);
   if (page === 'libre') return a === 'go' ? renderPlayer() : a === 'muscu' ? renderCibleSession() : renderLibre();
   if (page === 'progress') return renderProgress();
+  if (page === 'history') return renderHistoryEntry(decodeURIComponent(a || ''));
   if (page === 'profile') return renderProfile();
   return renderToday();
 }
@@ -211,6 +221,16 @@ function renderToday() {
   const nextIdx = p.days.findIndex((day, d) => day > wd && !isDone(week, d));
   const m = bodyMetrics(p, state.health);
   const hello = new Date().getHours() < 18 ? 'Salut' : 'Bonsoir';
+  // Séances hors programme de la semaine, et muscles qu'elles ont travaillés il y a moins de 36 h.
+  const monday = mondayOf(new Date()).getTime();
+  const offProgram = state.history.filter((h) => (h.type === 'libre' || h.type === 'cible') && isRealSession(h) && new Date(h.date).getTime() >= monday).length;
+  let overlapCard = '';
+  if (ti >= 0 && !isDone(week, ti)) {
+    const recent = recentMuscles(state.history, { only: (h) => h.type === 'libre' || h.type === 'cible' });
+    const todayMuscles = [...new Set(sessionFor(week, ti).exercises.map((e) => primaryMuscle(e.id)).filter(Boolean))];
+    const hit = todayMuscles.filter((k) => recent[k]);
+    if (hit.length) overlapCard = `<div class="card" style="border-color:rgba(255,179,71,.5)"><h3>⚠ Muscles déjà travaillés</h3><p class="small muted" style="margin:6px 0 0">${hit.map((k) => esc(MUSCLES[k].name)).join(', ')} : déjà travaillé${hit.length > 1 ? 's' : ''} il y a moins de 36 h (« ${esc(recent[hit[0]])} »). Sur ces exercices, retire une série ou garde 1 à 2 répétitions de plus en réserve.</p></div>`;
+  }
 
   let main;
   if (ti >= 0) {
@@ -230,10 +250,12 @@ function renderToday() {
       <span class="pill accent">Semaine ${week} · ${phase.name}</span>
       <span class="pill">Cycle ${blockOf(week) + 1}</span>
       <span class="pill">${doneThisWeek}/${p.days.length} séances</span>
+      ${offProgram ? `<span class="pill">+ ${offProgram} hors programme</span>` : ''}
     </div>
     ${Sync.getStatus().configured && !Sync.getStatus().connected ? `<a class="card row between" href="#/profile" style="border-color:rgba(124,196,255,.35)">
       <div><h3>☁ Sauvegarde ton programme</h3><div class="small muted">Crée ton compte pour ne jamais perdre tes séances.</div></div><span class="chev">›</span></a>` : ''}
     ${formeCard()}
+    ${overlapCard}
     ${main}
     <a class="card row between" href="#/libre"><div><h3>⚡ Séance libre</h3><div class="small muted">Cardio, abdos, ou un muscle au choix : où tu veux, avec ce que tu as.</div></div><span class="chev">›</span></a>
     <h2>Ta journée</h2>
@@ -439,8 +461,12 @@ function bindSetControls(data, exList) {
   });
 }
 
+// Exercices au poids du corps (ou à l'élastique) : pas de colonne kg, sauf ceux où l'on peut ajouter un lest.
+const WEIGHTED_BODYWEIGHT = new Set(['pullup', 'chinup', 'dips']);
 function exerciseCard(e, i, d, locked) {
   const range = e.repsMin === e.repsMax ? `${e.repsMin}` : `${e.repsMin}–${e.repsMax}`;
+  const noKg = e.unit === 'pdc' && !e.assisted && !WEIGHTED_BODYWEIGHT.has(e.id);
+  const kgHead = noKg ? '' : WEIGHTED_BODYWEIGHT.has(e.id) ? 'lest kg' : 'kg';
   const unit = e.timed ? 's' : 'reps';
   const sets = d ? d.sets : [];
   return `<div class="card ex ${e.role === 'main' ? 'main' : ''}">
@@ -458,10 +484,10 @@ function exerciseCard(e, i, d, locked) {
     ${mediaBlock(e)}
     <div class="ex-cue">${esc(e.cue)}${howtoBlock(e.id)}${e.loadNote ? `<div style="color:var(--text);margin-top:6px">${esc(e.loadNote)}</div>` : ''}</div>
     <div class="sets">
-      <div class="set-head"><span>#</span><span>kg</span><span>${unit}</span><span></span></div>
+      <div class="set-head"><span>#</span><span>${kgHead}</span><span>${unit}</span><span></span></div>
       ${sets.map((st, k) => `<div class="set ${st.done ? 'done' : ''}">
         <span class="n">${k + 1}</span>
-        <input type="number" inputmode="decimal" step="0.5" placeholder="${e.load ?? '—'}" value="${st.w ?? ''}" data-slot="${e.slot}" data-set="${k}" data-field="w" ${locked ? 'disabled' : ''} aria-label="Charge série ${k + 1}">
+        ${noKg ? '<span class="muted small" style="text-align:center">poids du corps</span>' : `<input type="number" inputmode="decimal" step="0.5" placeholder="${e.load ?? (WEIGHTED_BODYWEIGHT.has(e.id) ? '0' : '—')}" value="${st.w ?? ''}" data-slot="${e.slot}" data-set="${k}" data-field="w" ${locked ? 'disabled' : ''} aria-label="Charge série ${k + 1}">`}
         <input type="number" inputmode="numeric" placeholder="${range}" value="${st.r ?? ''}" data-slot="${e.slot}" data-set="${k}" data-field="r" ${locked ? 'disabled' : ''} aria-label="Répétitions série ${k + 1}">
         <button class="check" data-slot="${e.slot}" data-set="${k}" ${locked ? 'disabled' : ''} aria-label="Valider la série">✓</button>
       </div>`).join('')}
@@ -599,14 +625,19 @@ function libreOpts() {
   const volet = ['cardio', 'abdos', 'cible'].includes(o.volet) ? o.volet : 'cardio';
   const goal = volet === 'abdos' ? 'abdos' : 'cardio';
   const allowed = durationsFor(goal);
+  // Forme du jour basse : séance un cran plus douce (rythme du niveau inférieur), comme le programme allège.
+  const ready = readiness(state.health);
+  const LOWER = { avance: 'intermediaire', intermediaire: 'debutant', debutant: 'debutant' };
   return {
-    volet, goal, place,
+    volet, goal, place, adjust: adjustText(ready),
     // Durée ramenée dans les choix du volet (ex. 90 min en cardio, puis passage en abdos).
     minutes: allowed.includes(o.minutes) ? o.minutes : Math.min(Math.max(...allowed), Math.max(allowed[0], o.minutes || 30)),
     equip: o.equip || [...DEFAULT_EQUIP[place]], seed: o.seed || 0,
-    level: p.level, lowImpact: bodyMetrics(p).bmi >= 30,
+    level: ready?.level === 'basse' ? LOWER[p.level] : p.level, lowImpact: bodyMetrics(p).bmi >= 30,
   };
 }
+// Bandeau « forme du jour » commun aux séances libres et ciblées (même texte que le programme).
+const adjustBanner = (a) => (a ? `<div class="card" style="border-color:${a.level === 'basse' ? 'var(--danger)' : 'rgba(255,179,71,.5)'}"><h3>${a.level === 'basse' ? '🔋 Séance allégée' : '🔋 Séance modérée'}</h3><p class="small muted" style="margin:6px 0 0">${esc(a.text)}${a.level === 'basse' && a.libre ? ' Rythme plus doux que d’habitude.' : ''}</p></div>` : '');
 const VOLETS = { cardio: ['❤️ Cardio', 'Souffle, endurance'], abdos: ['🔥 Abdos', 'Sangle abdominale'], cible: ['💪 Muscu', 'Un muscle au choix'] };
 function voletChips(current) {
   return `<div class="chips volets">${Object.entries(VOLETS).map(([k, [l, sub]]) => `<button type="button" class="chip ${current === k ? 'on' : ''}" data-volet="${k}">${l}<small>${sub}</small></button>`).join('')}</div>`;
@@ -627,6 +658,7 @@ function renderLibre() {
     <div class="eyebrow">Hors programme</div><h1>Séance libre</h1>
     ${cibleResume()}
     ${voletChips(o.volet)}
+    ${adjustBanner(o.adjust && { ...o.adjust, libre: true })}
     <p class="muted small">Une séance chronométrée, faite pour ce que tu as sous la main. Elle compte pour ta régularité et tes badges, sans toucher aux charges de ton programme.</p>
     <div class="card">
       <label class="field"><span>Où ?</span><div class="chips">${Object.entries(PLACES).map(([k, [l, ic]]) => chip('place', k, o.place === k, `${ic} ${l}`)).join('')}</div></label>
@@ -651,7 +683,7 @@ function renderLibre() {
     </div>`;
 
   bindVolets(o);
-  const set = (patch) => { state.libre = { ...o, ...patch }; delete state.libre.level; delete state.libre.lowImpact; delete state.libre.goal; saveLocal(); renderLibre(); };
+  const set = (patch) => { state.libre = { ...o, ...patch }; delete state.libre.level; delete state.libre.lowImpact; delete state.libre.goal; delete state.libre.adjust; saveLocal(); renderLibre(); };
   $app.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => {
     const { g, val } = b.dataset;
     if (g === 'place') set({ place: val, equip: [...DEFAULT_EQUIP[val]], seed: 0 });
@@ -673,7 +705,15 @@ function cibleOpts() {
     muscles: (c.muscles || []).filter((m) => MUSCLES[m]).slice(0, 2),
     equip: c.equip || [...CIBLE_DEFAULT_EQUIP[place]],
     minutes: CIBLE_DURATIONS.includes(c.minutes) ? c.minutes : 60, seed: c.seed || 0,
+    ready: readiness(state.health),
   };
+}
+// Muscles choisis déjà travaillés il y a moins de 36 h (programme ou séance ciblée).
+function recentWarning(keys) {
+  const recent = recentMuscles(state.history);
+  const hit = keys.filter((k) => recent[k]);
+  if (!hit.length) return '';
+  return `<div class="card" style="border-color:rgba(255,179,71,.5)"><h3>⚠ Déjà travaillé récemment</h3><p class="small muted" style="margin:6px 0 0">${hit.map((k) => `${esc(MUSCLES[k].name)} : « ${esc(recent[k])} »`).join(' · ')}, il y a moins de 36 h. Un muscle a besoin de 48 h environ pour récupérer : garde 1 à 2 répétitions de plus en réserve, ou choisis un autre muscle.</p></div>`;
 }
 const fmtMin = (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${String(m % 60).padStart(2, '0')}` : ''}`);
 // Séance ciblée en cours : rappel en haut de l'onglet Libre.
@@ -703,6 +743,8 @@ function renderCibleSetup() {
     <div class="eyebrow">Hors programme</div><h1>Séance libre</h1>
     ${cibleResume()}
     ${voletChips('cible')}
+    ${plan && plan.adjust ? adjustBanner(plan.adjust) : ''}
+    ${recentWarning(ss ? o.muscles : [o.muscle])}
     <p class="muted small">Un seul muscle, travaillé zone par zone. Tu notes tes séries comme dans le programme, et les charges proposées tiennent compte de tes séances passées.</p>
     <div class="card">
       <label class="field"><span>Où ?</span><div class="chips">${Object.entries(PLACES).map(([k, [l, ic]]) => chip('place', k, o.place === k, `${ic} ${l}`)).join('')}</div></label>
@@ -719,7 +761,7 @@ function renderCibleSetup() {
       ${capText ? `<p class="small guide">${capText}</p>` : ''}
       ${ss && !ready ? '<p class="guide">Choisis un 2e muscle pour composer tes supersets.</p>'
         : empty ? `<p class="guide">Sans matériel, on ne peut pas travailler correctement ${ss ? 'ces muscles' : 'ce muscle'}. Coche plus de matériel${plan && !ss ? ` : ${esc([...new Set(plan.zones.flatMap((z) => z.missing || []))].join(', '))}` : ''}.</p>` : ''}
-      <div class="tip small"><div>Échauffement · 5 min <div class="muted">Cardio léger, puis 2 séries légères sur le premier exercice.</div></div></div>
+      <div class="tip small"><div>Échauffement · 8 min <div class="muted">5 min de cardio léger, puis 2 séries d’approche sur le premier exercice.</div></div></div>
       ${(plan ? plan.zones : []).map((z, zi) => `<div class="tip small"><div><b>${ss ? '' : `${zi + 1}. `}${esc(z.zone.name)}</b>
         <p class="guide">${esc(z.zone.desc)}</p>
         ${z.exercises.length ? `<div class="freeex-list">${z.exercises.map((e) => ciblePreview(e)).join('')}</div>`
@@ -727,7 +769,7 @@ function renderCibleSetup() {
       <div class="row" style="margin-top:12px"><button class="btn ghost" id="reroll" style="flex:1">↻ Autre séance</button><button class="btn primary" id="go" style="flex:1" ${empty ? 'disabled' : ''}>▶ Démarrer</button></div>
     </div>`;
   bindVolets(o);
-  const set = (patch) => { state.cible = { ...(state.cible || {}), ...o, ...patch }; saveLocal(); renderLibre(); };
+  const set = (patch) => { const { ready, ...keep } = o; state.cible = { ...(state.cible || {}), ...keep, ...patch }; saveLocal(); renderLibre(); };
   $app.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => {
     const { g, val } = b.dataset;
     if (g === 'place') set({ place: val, equip: [...CIBLE_DEFAULT_EQUIP[val]], seed: 0 });
@@ -745,7 +787,8 @@ function renderCibleSetup() {
     if (state.cible?.active && !confirm('Une séance ciblée est déjà en cours. La remplacer ?')) return;
     const session = ss ? buildSuperset(p, o, state.history, o.seed) : buildTargeted(p, o, state.history, o.seed);
     const draft = { exercises: Object.fromEntries(session.exercises.map((e) => [e.slot, { id: e.id, sets: Array.from({ length: e.sets }, () => ({ w: e.load ?? '', r: '', done: false })) }])) };
-    state.cible = { ...state.cible, ...o, active: session, draft, opts: o };
+    const { ready, ...keep } = o;
+    state.cible = { ...state.cible, ...keep, active: session, draft, opts: keep };
     saveLocal();
     location.hash = '#/libre/muscu';
   };
@@ -769,7 +812,8 @@ function renderCibleSession() {
     <div class="eyebrow" style="margin-top:10px">${s.mode === 'superset' ? 'Superset' : 'Muscu ciblée'} · ${esc(PLACES[s.place][0])}</div>
     <h1>${s.mode === 'superset' ? s.muscles.map((k) => `${MUSCLES[k].icon} ${esc(MUSCLES[k].name)}`).join(' + ') : `${MUSCLES[s.muscle].icon} ${esc(MUSCLES[s.muscle].name)}`}</h1>
     <div class="row wrap" style="margin:8px 0 14px"><span class="pill">≈ ${s.minutes} min</span><span class="pill">${s.exercises.length} exercices · ${s.sets} séries</span></div>
-    <div class="card"><h3>Échauffement · 5 min</h3><p class="small muted" style="margin:6px 0 0">5 min de cardio léger, quelques mouvements articulaires, puis 2 séries légères (environ 50 % puis 70 % de la charge) sur le premier exercice.</p></div>
+    ${s.adjust ? adjustBanner(s.adjust) : ''}
+    <div class="card"><h3>Échauffement · 8 min</h3><p class="small muted" style="margin:6px 0 0">5 min de cardio léger et quelques mouvements articulaires, puis 2 séries d’approche (environ 50 % puis 70 % de la charge) sur le premier exercice.</p></div>
     ${s.zones.filter((z) => z.exercises.length).map((z) => `<div class="zone-head"><h2>${esc(z.zone.name)}</h2><p class="small muted">${esc(z.zone.desc)}</p></div>
       ${z.exercises.map((e) => exerciseCard({ ...s.exercises.find((x) => x.slot === e.slot) }, n++, data.exercises[e.slot], false)).join('')}`).join('')}
     <div class="card"><h3>Retour au calme · 5 min</h3><p class="small muted" style="margin:6px 0 0">Étire le muscle travaillé, respire lentement. Bois de l’eau et prends un repas avec ${Math.round(p.weight * 0.4)} g de protéines dans les 2 h.</p></div>
@@ -851,7 +895,7 @@ let player = null; // { plan, idx, endAt, left, paused, elapsed, lastTick, done 
 let playerTick = null;
 function startPlayer(plan) {
   stopTimer();
-  player = { plan, idx: 0, left: plan.steps[0].secs, paused: true, elapsed: 0, lastTick: null, started: false };
+  player = { plan, idx: 0, left: plan.steps[0].secs, paused: true, elapsed: 0, lastTick: null, started: false, done: new Set() };
   resumePlayer();
 }
 function scheduleSteps() {
@@ -889,6 +933,7 @@ function tickPlayer() {
   player.left -= dt; player.elapsed += dt;
   let changed = false;
   while (player.left <= 0 && player.idx < player.plan.steps.length) {
+    player.done.add(player.idx); // étape menée jusqu'au bout
     player.idx++; changed = true;
     if (player.idx >= player.plan.steps.length) { finishPlayer(true); return; }
     player.left += player.plan.steps[player.idx].secs;
@@ -898,6 +943,9 @@ function tickPlayer() {
 }
 function skipStep() {
   if (!player) return;
+  // Une étape passée ne compte comme faite que si au moins 60 % de son temps a été fait.
+  const st = player.plan.steps[player.idx];
+  if (st.secs - player.left >= st.secs * 0.6) player.done.add(player.idx);
   player.idx++;
   if (player.idx >= player.plan.steps.length) { finishPlayer(true); return; }
   player.left = player.plan.steps[player.idx].secs;
@@ -908,13 +956,22 @@ function finishPlayer(completed) {
   clearInterval(playerTick); playerTick = null; cancelSound(); keepAwake(false);
   const pl = player; player = null;
   const minutes = Math.round(pl.elapsed / 60);
-  if (!completed && minutes < 5) { location.hash = '#/libre'; return; }
+  // Seuls les efforts réellement faits sont enregistrés (pas ceux passés avec « Suivant »).
+  const ex = new Map();
+  for (const i of pl.done) {
+    const st = pl.plan.steps[i];
+    if (!st.exId || st.kind !== 'work') continue;
+    if (!ex.has(st.exId)) ex.set(st.exId, { id: st.exId, name: st.label.replace(/ : (effort|endurance)$/, ''), sets: [] });
+    ex.get(st.exId).sets.push({ w: 0, r: 0, done: true, secs: st.secs });
+  }
+  if (!ex.size || minutes < 3) {
+    if (!completed) alert('Rien à enregistrer : aucun effort mené jusqu’au bout.');
+    location.hash = '#/libre'; return;
+  }
   if (!completed && !confirm(`Enregistrer les ${minutes} min faites ?`)) { location.hash = '#/libre'; return; }
-  const ids = new Map();
-  for (const st of pl.plan.steps.slice(0, pl.idx + 1)) if (st.exId && st.kind === 'work') ids.set(st.exId, st.label.replace(/ : effort$/, ''));
   const before = [...state.history];
   state.history.push({ type: 'libre', name: pl.plan.title, goal: pl.plan.goal, place: pl.plan.place, minutes, date: new Date().toISOString(),
-    exercises: [...ids].map(([id, name]) => ({ id, name, sets: [] })) });
+    exercises: [...ex.values()] });
   state.libre = { ...(state.libre || {}), seed: ((state.libre || {}).seed || 0) + 1 }; // la prochaine fois, une autre séance
   save();
   $tab.hidden = false;
@@ -998,16 +1055,17 @@ function celebrate(list) {
 // ---------- Progrès ----------
 function renderProgress() {
   const p = state.profile;
-  const total = state.history.length;
-  const tonnage = state.history.reduce((t, h) => t + h.exercises.reduce((a, e) => a + e.sets.filter((s) => s.done).reduce((b, s) => b + s.w * s.r, 0), 0), 0);
-  // Régularité : semaines consécutives (jusqu'à la semaine en cours) avec au moins une séance.
+  // Mêmes règles que les récompenses (stats.js) : séances avec au moins une série validée,
+  // kilos réels (deux haltères comptés deux fois, assistance et poids du corps exclus).
+  const total = state.history.filter(isRealSession).length;
+  const tonnage = state.history.reduce((t, h) => t + h.exercises.reduce((a, e) => a + (e.sets || []).reduce((b, s) => b + setVolume(e.id, s), 0), 0), 0);
   // Régularité : semaines calendaires d'affilée avec au moins une séance, libres comprises.
   const streak = weekStreak(state.history);
   const records = {};
-  for (const h of state.history) for (const e of h.exercises) for (const s of e.sets) {
-    if (!s.done || !s.w || !s.r) continue;
-    const v = e1rm(s.w, s.r);
-    if (!records[e.id] || v > records[e.id].v) records[e.id] = { v, w: s.w, r: s.r, name: e.name };
+  for (const h of state.history) for (const e of h.exercises) for (const s of e.sets || []) {
+    const v = setE1rm(e.id, s);
+    if (!v) continue;
+    if (!records[e.id] || v > records[e.id].v) records[e.id] = { v, w: s.w, r: s.r, name: e.name, id: e.id };
   }
   const top = Object.values(records).sort((a, b) => b.v - a.v).slice(0, 8);
   const m = bodyMetrics(p, state.health);
@@ -1019,6 +1077,7 @@ function renderProgress() {
       <div class="stat"><b>${streak}</b><span>sem. d’affilée</span></div>
       <div class="stat"><b>${(tonnage / 1000).toFixed(1).replace('.', ',')} t</b><span>soulevées</span></div>
     </div>
+    <p class="small muted" style="margin:-6px 0 12px">Tonnes : charges ajoutées uniquement (hors poids du corps et assistance).</p>
     <h2>Poids de corps</h2>
     <div class="card">
       ${weightChart()}
@@ -1029,15 +1088,16 @@ function renderProgress() {
       <p class="small muted" style="margin:10px 0 0">IMC actuel ${m.bmi.toFixed(1).replace('.', ',')} · ${m.bmiLabel}. Pèse-toi le matin à jeun, 1 à 2 fois par semaine.</p>
     </div>
     <h2>Records estimés (1RM)</h2>
-    <div class="card">${top.length ? top.map((r) => `<div class="row between tip"><span>${esc(r.name)}</span><span><b>${Math.round(r.v)} kg</b> <span class="muted small">(${r.w} × ${r.r})</span></span></div>`).join('')
+    <div class="card">${top.length ? top.map((r) => `<div class="row between tip"><span>${esc(r.name)}</span><span><b>${Math.round(r.v)} kg${perDumbbell(r.id) ? ' / haltère' : ''}</b> <span class="muted small">(${r.w} × ${r.r})</span></span></div>`).join('')
       : '<p class="muted small" style="margin:0">Tes records apparaîtront après tes premières séances enregistrées.</p>'}</div>
     <h2>Récompenses</h2>
     ${rewardsCard(p)}
     <h2>Historique</h2>
     ${state.history.slice().reverse().slice(0, 12).map((h) => {
       const day = new Date(h.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-      if (h.type === 'libre') return `<div class="card row between"><div><h3>⚡ ${esc(h.name)}</h3><div class="small muted">${day} · séance libre · ${h.minutes} min</div></div></div>`;
-      if (h.type === 'cible') return `<div class="card row between"><div><h3>🎯 ${esc(h.name)}</h3><div class="small muted">${day} · muscu ciblée · ${h.exercises.reduce((k, e) => k + e.sets.filter((x) => x.done).length, 0)} séries</div></div></div>`;
+      const href = `#/history/${encodeURIComponent(h.date)}`;
+      if (h.type === 'libre') return `<a class="card row between" href="${href}"><div><h3>⚡ ${esc(h.name)}</h3><div class="small muted">${day} · séance libre · ${h.minutes} min</div></div><span class="chev">›</span></a>`;
+      if (h.type === 'cible') return `<a class="card row between" href="${href}"><div><h3>🎯 ${esc(h.name)}</h3><div class="small muted">${day} · muscu ciblée · ${h.exercises.reduce((k, e) => k + e.sets.filter((x) => x.done).length, 0)} séries</div></div><span class="chev">›</span></a>`;
       return `<a class="card row between" href="#/session/${h.week}/${h.dayIndex}">
       <div><h3>${esc(h.name)}</h3><div class="small muted">${day} · semaine ${h.week} · ${h.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0)} séries</div></div><span class="chev">›</span></a>`;
     }).join('') || '<p class="muted small">Aucune séance enregistrée pour l’instant.</p>'}`;
@@ -1049,6 +1109,31 @@ function renderProgress() {
     state.weights.push({ date: new Date().toISOString(), kg: v });
     state.profile.weight = v; // le bilan nutritionnel et les charges de départ suivent le poids
     touchProfile(); save(); route();
+  };
+}
+
+// Détail d'une séance libre ou ciblée, avec suppression (les séances du programme se rouvrent depuis leur page).
+function renderHistoryEntry(date) {
+  const h = state.history.find((x) => x.date === date);
+  if (!h) { location.hash = '#/progress'; return; }
+  if (h.type !== 'libre' && h.type !== 'cible') { location.hash = `#/session/${h.week}/${h.dayIndex}`; return; }
+  const d = new Date(h.date);
+  const line = (x) => (x.secs ? `${x.secs} s` : `${x.w ? `${String(x.w).replace('.', ',')} kg × ` : ''}${x.r} reps`);
+  $app.innerHTML = `
+    <a class="small muted" href="#/progress">‹ Progrès</a>
+    <div class="eyebrow" style="margin-top:10px">${fmtDate(d)} · ${h.type === 'libre' ? 'séance libre' : 'muscu ciblée'}${h.place && PLACES[h.place] ? ` · ${PLACES[h.place][0]}` : ''}</div>
+    <h1>${esc(h.name)}</h1>
+    <div class="row wrap" style="margin:8px 0 14px">${h.minutes ? `<span class="pill">${h.minutes} min</span>` : ''}<span class="pill">${h.exercises.reduce((k, e) => k + (e.sets || []).filter((x) => x.done).length, 0)} ${h.type === 'libre' ? 'efforts' : 'séries'}</span></div>
+    ${h.exercises.map((e) => {
+      const done = (e.sets || []).filter((x) => x.done);
+      return `<div class="card"><h3>${esc(e.name)}</h3><p class="small muted" style="margin:6px 0 0">${done.length ? done.map(line).join(' · ') : 'Aucune série validée'}</p></div>`;
+    }).join('') || '<p class="muted small">Aucun détail enregistré pour cette séance.</p>'}
+    <button class="btn ghost block" id="delete" style="margin-top:8px;color:var(--danger)">Supprimer cette séance</button>`;
+  $app.querySelector('#delete').onclick = () => {
+    if (!confirm('Supprimer cette séance de ton historique ? C’est définitif.')) return;
+    state.history = state.history.filter((x) => x !== h);
+    state.deleted = [...(state.deleted || []), h.date]; // la suppression suit aussi sur tes autres téléphones
+    save(); location.hash = '#/progress';
   };
 }
 
@@ -1352,7 +1437,7 @@ try { navigator.storage?.persist?.(); } catch { /* non pris en charge */ }
 // Le compte se branche après le premier affichage : l'appli reste utilisable hors ligne.
 Sync.init({
   get: () => state,
-  set: (merged) => { Object.assign(state, merged); saveLocal(); },
+  set: (merged) => { Object.assign(state, merged); migrateState(); saveLocal(); },
   setHealth: (rows) => { state.health = rows; applyHealthWeight(); saveLocal(); },
   // Retour du lien « mot de passe oublié » : on ouvre directement l'écran du nouveau mot de passe.
   recovery: () => { recoveryPending = false; restoring = false; location.hash = '#/password'; },

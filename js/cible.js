@@ -11,7 +11,6 @@ export const HOME = [
   // Pecs
   { id: 'c-pompes-declinees', name: 'Pompes déclinées', unit: 'pdc', kind: 'compound', pattern: 'hpush', diff: 2, needs: ['banc'], photo: 'Decline_Push-Up', cue: 'Pieds sur un banc ou une marche, mains largeur d’épaules : le haut des pecs travaille.' },
   { id: 'c-pompes-larges', name: 'Pompes mains larges', unit: 'pdc', kind: 'compound', pattern: 'hpush', diff: 1, needs: [], photo: 'Push-Up_Wide', cue: 'Mains plus larges que les épaules, descends la poitrine entre les mains.' },
-  { id: 'c-pompes', name: 'Pompes classiques', unit: 'pdc', kind: 'compound', pattern: 'hpush', diff: 1, needs: [], photo: 'Pushups', cue: 'Corps gainé, coudes à 45°, poitrine près du sol. Sur les genoux si besoin.' },
   { id: 'c-pompes-inclinees', name: 'Pompes inclinées', unit: 'pdc', kind: 'compound', pattern: 'hpush', diff: 1, needs: [], photo: 'Incline_Push-Up', cue: 'Mains sur un banc, un muret ou une table : le bas des pecs travaille.' },
   { id: 'c-floor-press', name: 'Développé haltères au sol', unit: 'halteres', kind: 'compound', pattern: 'hpush', diff: 1, coef: 0.25, needs: ['halteres'], photo: 'Dumbbell_Floor_Press', cue: 'Allongé au sol, coudes qui touchent le sol en bas, pousse vers le haut.' },
   { id: 'c-ecartes-sol', name: 'Écartés haltères', unit: 'halteres', kind: 'iso', pattern: 'chest', diff: 1, coef: 0.1, needs: ['halteres'], photo: 'Dumbbell_Flyes', cue: 'Bras légèrement fléchis, ouvre jusqu’à l’étirement, referme en serrant.' },
@@ -20,6 +19,9 @@ export const HOME = [
   { id: 'c-rowing-2-halteres', name: 'Rowing deux haltères', unit: 'halteres', kind: 'compound', pattern: 'hpull', diff: 1, coef: 0.25, needs: ['halteres'], photo: 'Bent_Over_Two-Dumbbell_Row', cue: 'Buste penché, dos plat, coudes vers les hanches.' },
   { id: 'c-oiseau-elastique', name: 'Oiseau élastique', unit: 'pdc', kind: 'iso', pattern: 'rear', diff: 1, needs: ['elastique'], photo: 'Back_Flyes_-_With_Bands', cue: 'Bras tendus devant, ouvre en serrant les omoplates.' },
   { id: 'c-ecartes-elastique', name: 'Écartés élastique', unit: 'pdc', kind: 'iso', pattern: 'rear', diff: 1, needs: ['elastique'], photo: 'Band_Pull_Apart', cue: 'Élastique tendu devant, écarte jusqu’à la poitrine.' },
+  { id: 'c-shrug-barre', name: 'Shrug barre', unit: 'barre', kind: 'iso', pattern: 'hpull', diff: 1, coef: 0.8, needs: ['salle'], photo: 'Barbell_Shrug', cue: 'Bras tendus, monte les épaules vers les oreilles, sans rouler les épaules.' },
+  { id: 'c-shrug-halteres', name: 'Shrug haltères', unit: 'halteres', kind: 'iso', pattern: 'hpull', diff: 1, coef: 0.35, needs: ['halteres'], photo: 'Dumbbell_Shrug', cue: 'Haltères le long du corps, monte les épaules vers les oreilles.' },
+  { id: 'c-hyper-banc', name: 'Extensions lombaires au banc', unit: 'pdc', kind: 'iso', pattern: 'hinge', diff: 1, needs: ['salle'], photo: 'Hyperextensions_Back_Extensions', cue: 'Bassin calé sur le banc, descends le buste dos plat, remonte jusqu’à l’alignement.' },
   { id: 'c-superman', name: 'Superman', unit: 'pdc', kind: 'iso', pattern: 'hinge', diff: 1, needs: [], photo: 'Superman', cue: 'À plat ventre, décolle bras et jambes, tiens 2 s.' },
   { id: 'c-hyper-sol', name: 'Extensions lombaires au sol', unit: 'pdc', kind: 'iso', pattern: 'hinge', diff: 1, needs: [], photo: 'Hyperextensions_With_No_Hyperextension_Bench', cue: 'À plat ventre, mains aux tempes, décolle le buste sans forcer.' },
   { id: 'c-good-morning-elastique', name: 'Good morning élastique', unit: 'pdc', kind: 'compound', pattern: 'hinge', diff: 1, needs: ['elastique'], photo: 'Band_Good_Morning', cue: 'Élastique sous les pieds et derrière la nuque, penche-toi dos plat.' },
@@ -33,7 +35,6 @@ export const HOME = [
   { id: 'c-curl-halteres', name: 'Curl haltères alterné', unit: 'halteres', kind: 'iso', pattern: 'biceps', diff: 1, coef: 0.12, needs: ['halteres'], photo: 'Dumbbell_Alternate_Bicep_Curl', cue: 'Coudes collés au corps, tourne le poignet en montant.' },
   { id: 'c-curl-concentre', name: 'Curl concentré', unit: 'halteres', kind: 'iso', pattern: 'biceps', diff: 1, coef: 0.1, needs: ['halteres'], photo: 'Concentration_Curls', cue: 'Assis, coude contre l’intérieur de la cuisse, monte lentement.' },
   { id: 'c-curl-elastique', name: 'Curl élastique', unit: 'pdc', kind: 'iso', pattern: 'biceps', diff: 1, needs: ['elastique'], photo: null, anim: 'c-curl-elastique', cue: 'Élastique sous les pieds, coudes collés au corps, monte les mains aux épaules.' },
-  { id: 'c-chinup', name: 'Tractions supination', unit: 'pdc', kind: 'compound', pattern: 'vpull', diff: 2, needs: ['barre'], photo: 'Chin-Up', cue: 'Paumes vers toi, menton au-dessus de la barre.' },
   // Triceps
   { id: 'c-pompes-diamant', name: 'Pompes serrées', unit: 'pdc', kind: 'compound', pattern: 'triceps', diff: 2, needs: [], photo: 'Push-Ups_-_Close_Triceps_Position', cue: 'Mains sous la poitrine, coudes le long du corps.' },
   { id: 'c-dips-banc', name: 'Dips sur banc', unit: 'pdc', kind: 'compound', pattern: 'triceps', diff: 1, needs: ['banc'], photo: 'Bench_Dips', cue: 'Mains au bord d’un banc ou d’une chaise, coudes vers l’arrière.' },
@@ -86,23 +87,23 @@ export const CIBLE_DEFAULT_EQUIP = { salle: [], maison: ['banc'], dehors: ['barr
 export const MUSCLES = {
   pecs: { name: 'Pectoraux', the: 'les pecs', icon: '🫁', cap: 18, zones: [
     { id: 'haut', name: 'Haut des pecs', desc: 'Partie sous la clavicule : banc incliné ou pieds surélevés. C’est souvent la zone en retard.', ex: ['incline-bench', 'incline-db', 'c-pompes-declinees'] },
-    { id: 'milieu', name: 'Milieu des pecs', desc: 'Le gros de la masse : développés et pompes à plat.', ex: ['bench', 'db-bench', 'chest-press', 'c-floor-press', 'c-pompes-larges', 'c-pompes'] },
+    { id: 'milieu', name: 'Milieu des pecs', desc: 'Le gros de la masse : développés et pompes à plat.', ex: ['bench', 'db-bench', 'chest-press', 'c-floor-press', 'c-pompes-larges', 'pompes'] },
     { id: 'bas', name: 'Bas des pecs', desc: 'Le bas et le contour : dips, pompes mains surélevées, poulie de haut en bas.', ex: ['dips', 'cable-fly', 'c-pompes-inclinees'] },
     { id: 'iso', name: 'Étirement et contraction', desc: 'Exercices d’isolation pour finir : grande amplitude, contraction serrée.', ex: ['pec-deck', 'incline-fly', 'c-ecartes-sol'] },
   ] },
   dos: { name: 'Dos', the: 'le dos', icon: '🪽', cap: 20, zones: [
     { id: 'largeur', name: 'Largeur (grand dorsal)', desc: 'Tirages verticaux : ce qui donne la forme en V.', ex: ['pullup', 'lat-pulldown', 'assisted-pullup', 'chinup', 'close-pulldown'] },
     { id: 'epaisseur', name: 'Épaisseur (milieu du dos)', desc: 'Rowings : la densité entre les omoplates.', ex: ['row', 'tbar', 'cable-row', 'machine-row', 'db-row', 'c-rowing-2-halteres', 'c-australien'] },
-    { id: 'haut', name: 'Haut du dos', desc: 'Trapèzes et arrière des épaules : posture et épaisseur du haut.', ex: ['face-pull', 'reverse-pec', 'rear-fly', 'c-oiseau-elastique', 'c-ecartes-elastique'] },
-    { id: 'bas', name: 'Bas du dos (lombaires)', desc: 'Les muscles qui tiennent la colonne : charges modérées, mouvement contrôlé.', ex: ['rdl', 'good-morning', 'c-good-morning-elastique', 'c-hyper-sol', 'c-superman'] },
+    { id: 'haut', name: 'Haut du dos (trapèzes)', desc: 'Les trapèzes, entre la nuque et les épaules : haussements d’épaules et écartés. L’arrière d’épaule se travaille avec les épaules.', ex: ['c-shrug-barre', 'c-shrug-halteres', 'c-ecartes-elastique'] },
+    { id: 'bas', name: 'Bas du dos (lombaires)', desc: 'Les muscles qui tiennent la colonne : extensions du buste, sans charge lourde. Le soulevé de terre roumain, lui, travaille surtout l’arrière des cuisses (voir Jambes).', ex: ['c-hyper-banc', 'c-hyper-sol', 'c-superman'] },
   ] },
   epaules: { name: 'Épaules', the: 'les épaules', icon: '🎯', cap: 16, zones: [
     { id: 'avant', name: 'Avant (développés)', desc: 'Faisceau avant : déjà sollicité par les pecs, un ou deux exercices suffisent.', ex: ['ohp', 'db-press', 'arnold', 'shoulder-machine', 'c-dev-elastique', 'c-pompes-poirier', 'c-front-raise'] },
     { id: 'cote', name: 'Côté (largeur)', desc: 'Faisceau moyen : ce qui élargit la carrure. Charges légères, beaucoup de reps.', ex: ['lat-raise', 'cable-lat', 'machine-lat', 'c-lat-elastique', 'c-tirage-menton'] },
-    { id: 'arriere', name: 'Arrière', desc: 'Faisceau arrière : souvent oublié, important pour l’équilibre de l’épaule.', ex: ['rear-fly', 'face-pull', 'reverse-pec', 'c-oiseau-elastique', 'c-ecartes-elastique'] },
+    { id: 'arriere', name: 'Arrière', desc: 'Faisceau arrière : souvent oublié, important pour l’équilibre de l’épaule.', ex: ['rear-fly', 'face-pull', 'reverse-pec', 'c-oiseau-elastique'] },
   ] },
   biceps: { name: 'Biceps', the: 'les biceps', icon: '💪', cap: 12, zones: [
-    { id: 'long', name: 'Chef long (étirement)', desc: 'Bras derrière le corps (banc incliné) ou le long du corps : la « boule » du biceps.', ex: ['incline-curl', 'ez-curl', 'cable-curl', 'c-curl-halteres', 'c-chinup', 'c-curl-elastique'] },
+    { id: 'long', name: 'Chef long (étirement)', desc: 'Bras derrière le corps (banc incliné) ou le long du corps : la « boule » du biceps.', ex: ['incline-curl', 'ez-curl', 'cable-curl', 'c-curl-halteres', 'chinup', 'c-curl-elastique'] },
     { id: 'court', name: 'Chef court (contraction)', desc: 'Coudes devant le corps : pupitre, curl concentré. L’épaisseur intérieure.', ex: ['preacher', 'c-curl-concentre', 'cable-curl', 'c-curl-elastique'] },
     { id: 'brachial', name: 'Brachial et avant-bras', desc: 'Prise marteau : le muscle sous le biceps qui pousse le bras vers l’extérieur.', ex: ['hammer'] },
   ] },
@@ -113,7 +114,7 @@ export const MUSCLES = {
   ] },
   jambes: { name: 'Jambes', the: 'les jambes', icon: '🦵', cap: 22, zones: [
     { id: 'quad', name: 'Quadriceps (avant des cuisses)', desc: 'Squats, presse, fentes : genoux qui avancent.', ex: ['squat', 'hack-squat', 'presse', 'front-squat', 'goblet', 'bulgare', 'leg-ext', 'c-squat-halteres', 'c-split-squat', 'c-squat-elastique', 'c-squat'] },
-    { id: 'ischios', name: 'Ischios (arrière des cuisses)', desc: 'Charnière de hanche et flexion du genou.', ex: ['rdl', 'lying-curl', 'seated-curl', 'rdl-halteres', 'c-curl-ischio-elastique', 'c-pont-1j'] },
+    { id: 'ischios', name: 'Ischios (arrière des cuisses)', desc: 'Charnière de hanche et flexion du genou.', ex: ['rdl', 'lying-curl', 'seated-curl', 'rdl-halteres', 'good-morning', 'c-good-morning-elastique', 'c-curl-ischio-elastique', 'c-pont-1j'] },
     { id: 'fessiers', name: 'Fessiers', desc: 'Extension de hanche : hip thrust, ponts, fentes arrière.', ex: ['hip-thrust', 'glute-bridge', 'c-fente-arriere', 'kickback-cable', 'c-pont', 'c-kickback-sol'] },
     { id: 'mollets', name: 'Mollets', desc: 'Amplitude complète : talons bas, pointe haute.', ex: ['calf-standing', 'calf-seated', 'calf-press', 'c-mollets-halteres', 'c-mollets'] },
   ] },
@@ -133,6 +134,26 @@ function schemeFor(e, isFirst, level) {
   return [3, 10, 15, deb ? 2 : 1, 75];
 }
 const setSeconds = (rest) => 45 + rest;
+
+// Forme du jour (sommeil, cœur au repos, VFC) : mêmes règles que le programme.
+// Basse : une série de moins (minimum 2) et charges −10 %. Moyenne : une répétition de plus en réserve.
+function adjustScheme(sc, ready) {
+  if (!ready || ready.level === 'bonne') return sc;
+  if (ready.level === 'basse') return [Math.max(2, sc[0] - 1), sc[1], sc[2], sc[3] + 1, sc[4]];
+  if (ready.level === 'moyenne') return [sc[0], sc[1], sc[2], sc[3] + 1, sc[4]];
+  return sc;
+}
+function adjustLoad(load, e, ready) {
+  if (!load || !ready || ready.level !== 'basse' || e.assisted) return load;
+  const step = e.unit === 'halteres' ? 2 : 2.5;
+  return Math.max(step, Math.round((load * 0.9) / step) * step);
+}
+export function adjustText(ready) {
+  if (!ready || !ready.reasons || !ready.reasons.length) return null;
+  if (ready.level === 'basse') return { level: 'basse', text: `Récupération insuffisante — ${ready.reasons.join(', ')}. Une série de moins, charges −10 %.` };
+  if (ready.level === 'moyenne') return { level: 'moyenne', text: `Forme moyenne — ${ready.reasons.join(', ')}. Garde une répétition de plus en réserve.` };
+  return null;
+}
 
 function rng(seed) {
   let s = seed >>> 0;
@@ -187,14 +208,15 @@ export function buildTargeted(p, opts, history = [], seed = 0) {
     zone: z.zone,
     missing: z.cands.length ? null : missingFor(z.zone, opts.equip || []),
     exercises: z.picked.map(({ e, sc, pass }) => {
-      const sug = suggestLoad(e, p, history, sc, 'acc');
+      const scheme = adjustScheme(sc, opts.ready);
+      const sug = suggestLoad(e, p, history, scheme, 'acc');
       const pool = z.cands.length;
       return {
         slot: slot++, role: slot === 1 ? 'main' : e.kind === 'compound' ? 'sec' : 'acc', pattern: e.pattern,
         id: e.id, name: e.name, cue: e.cue, unit: e.unit, timed: !!e.timed, zone: z.zone.id, anim: e.anim,
         muscle: opts.muscle, kind: e.kind, rank: pass * 10 + zi,
-        subtitle: z.zone.name, sets: sc[0], repsMin: sc[1], repsMax: sc[2], rir: sc[3], rest: sc[4],
-        load: sug.load, loadNote: e.unit === 'pdc' && !e.coef
+        subtitle: z.zone.name, sets: scheme[0], repsMin: scheme[1], repsMax: scheme[2], rir: scheme[3], rest: scheme[4],
+        load: adjustLoad(sug.load, e, opts.ready), loadNote: e.unit === 'pdc' && !e.coef
           ? (e.needs?.includes('elastique') ? 'Élastique : choisis une tension qui t’amène près de l’échec dans la fourchette.' : 'Au-delà de 20 reps faciles, passe à la variante plus dure (⇄).')
           : sug.note,
         assisted: !!sug.assisted, poolSize: pool,
@@ -205,7 +227,7 @@ export function buildTargeted(p, opts, history = [], seed = 0) {
   const minutes = Math.round((used + 300) / 60);
   return {
     title: `${m.name} · ${opts.minutes} min`, muscle: opts.muscle, place: opts.place, requested: opts.minutes,
-    zones: outZones, exercises, minutes, sets,
+    zones: outZones, exercises, minutes, sets, adjust: adjustText(opts.ready),
     capped: sets >= m.cap - 2 && minutes < opts.minutes - 5,
   };
 }
@@ -220,7 +242,10 @@ export function buildSuperset(p, opts, history = [], seed = 0) {
   // Tous les exercices possibles pour chaque muscle (dans la limite de séries), dans l'ordre de priorité.
   const pick = (muscle) => buildTargeted(p, { ...opts, muscle, minutes: 240 }, history, seed).exercises
     .slice().sort((x, y) => x.rank - y.rank);
-  const A = pick(ma); const B = pick(mb);
+  const A = pick(ma);
+  // Garde-fou : un exercice ne peut pas servir aux deux muscles de la même séance.
+  const inA = new Set(A.map((e) => e.id));
+  const B = pick(mb).filter((e) => !inA.has(e.id));
   const budget = (opts.minutes - 5) * 60 - 180; // échauffement + séries d'approche
   const capA = MUSCLES[ma].cap; const capB = MUSCLES[mb].cap;
   let used = 0; let setsA = 0; let setsB = 0;
@@ -265,7 +290,7 @@ export function buildSuperset(p, opts, history = [], seed = 0) {
   return {
     mode: 'superset', muscles: [ma, mb], muscle: ma, place: opts.place, requested: opts.minutes,
     title: `${MUSCLES[ma].name} + ${MUSCLES[mb].name} · superset`,
-    zones, exercises, minutes, sets: setsA + setsB, pairs: pairs.length,
+    zones, exercises, minutes, sets: setsA + setsB, pairs: pairs.length, adjust: adjustText(opts.ready),
     capped: (setsA >= capA - 3 || setsB >= capB - 3) && minutes < opts.minutes - 5,
   };
 }
@@ -300,3 +325,30 @@ export function swapExercise(session, slot, next, p, history) {
 
 export const ALL_TARGET_EXERCISES = () => [...new Set(Object.values(MUSCLES).flatMap((m) => m.zones.flatMap((z) => z.ex)))].map(exById);
 export { EXERCISES };
+
+// ---------- Muscles déjà travaillés récemment ----------
+// Muscle principal d'un exercice : celui de sa zone en muscu ciblée, sinon le premier muscle déclaré.
+const MUSCLE_KEY = { pectoraux: 'pecs', dos: 'dos', 'épaules': 'epaules', biceps: 'biceps', triceps: 'triceps', quadriceps: 'jambes', ischios: 'jambes', fessiers: 'jambes', mollets: 'jambes' };
+export function primaryMuscle(id) {
+  const e = exById(id);
+  const first = e?.muscles?.[0];
+  if (first && MUSCLE_KEY[first]) return MUSCLE_KEY[first];
+  for (const [k, m] of Object.entries(MUSCLES)) if (m.zones.some((z) => z.ex.includes(id))) return k;
+  return null;
+}
+// Muscles travaillés (au moins une série validée) dans les `hours` dernières heures.
+// Renvoie { pecs: 'Pectoraux (ciblée)', … } avec le nom de la séance concernée.
+export function recentMuscles(history, { hours = 36, now = new Date(), only = () => true } = {}) {
+  const since = now.getTime() - hours * 3600e3;
+  const out = {};
+  for (const h of history) {
+    const t = new Date(h.date).getTime();
+    if (t < since || t > now.getTime() || !only(h)) continue;
+    for (const e of h.exercises || []) {
+      if (!(e.sets || []).some((s) => s.done)) continue;
+      const k = primaryMuscle(e.id);
+      if (k && !out[k]) out[k] = h.name || 'séance';
+    }
+  }
+  return out;
+}

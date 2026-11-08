@@ -38,3 +38,12 @@ test('newBadges ne renvoie que les nouveaux', () => {
   const after = [...before, libre('2026-11-03T08:00:00', 'dehors')];
   assert.deepEqual(newBadges(before, after, null).map((b) => b.id), ['outdoor']);
 });
+
+test('migration : anciens identifiants convertis vers l’identifiant unique', async () => {
+  const { migrateIds, canon } = await import('../js/ids.js');
+  const h = [{ date: 'x', exercises: [{ id: 'l-pompes', sets: [] }, { id: 'c-chinup', sets: [] }, { id: 'bench', sets: [] }] }];
+  assert.equal(migrateIds(h), true);
+  assert.deepEqual(h[0].exercises.map((e) => e.id), ['pompes', 'chinup', 'bench']);
+  assert.equal(canon('l-tractions'), 'pullup');
+  assert.equal(migrateIds(h), false, 'idempotent');
+});

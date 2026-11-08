@@ -303,7 +303,7 @@ export function buildSession(p, week, dayIndex, history = [], ready = null) {
     const scheme = [sets, base[1], base[2], base[3], base[4]];
     const sug = suggestLoad(ex, p, history, scheme, phase.key);
     return {
-      slot: si, role, pattern, id: ex.id, name: ex.name, cue: ex.cue, muscles: ex.muscles, unit: ex.unit, timed: !!ex.timed,
+      slot: si, role, pattern, id: ex.id, name: ex.name, cue: ex.cue, muscles: ex.muscles, unit: ex.unit, timed: !!ex.timed, anim: ex.anim,
       sets, repsMin: ex.timed ? 30 : base[1], repsMax: ex.timed ? 45 : base[2], rir: base[3], rest: base[4],
       load: sug.load, loadNote: sug.note, assisted: !!ex.assisted, poolSize: pool.length,
     };
@@ -327,7 +327,7 @@ export function buildSession(p, week, dayIndex, history = [], ready = null) {
   let adjust = null;
   if (ready && ready.level === 'moyenne' && phase.key !== 'deload') {
     for (const e of exercises) if (e.role !== 'acc') e.rir += 1;
-    adjust = { level: 'moyenne', text: `Forme moyenne (${ready.reasons.join(', ')}) : garde 1 répétition de plus en réserve sur les exercices principaux.` };
+    adjust = { level: 'moyenne', text: `Forme moyenne — ${ready.reasons.join(', ')}. Garde 1 répétition de plus en réserve sur les exercices principaux.` };
   } else if (ready && ready.level === 'basse') {
     for (const e of exercises) {
       e.sets = Math.max(2, e.sets - 1);
@@ -336,7 +336,7 @@ export function buildSession(p, week, dayIndex, history = [], ready = null) {
     }
     technique = null;
     if (cardio) cardio = { name: 'Cardio très léger', detail: '15 min de marche ou de vélo facile, sans essoufflement.', impact: 'low' };
-    adjust = { level: 'basse', text: `Récupération insuffisante (${ready.reasons.join(', ')}) : une série de moins partout, charges −10 %, pas de technique d’intensité.` };
+    adjust = { level: 'basse', text: `Récupération insuffisante — ${ready.reasons.join(', ')}. Une série de moins partout, charges −10 %, pas de technique d’intensité.` };
   }
 
   const warmup = warmupFor(tpl, exercises[0]);

@@ -1,7 +1,9 @@
 // Séance libre : une séance ponctuelle, hors programme, construite selon le lieu, le matériel
-// disponible, la durée et l'objectif (muscu, cardio ou mixte). Tout est chronométré :
+// disponible, la durée et l'objectif (cardio ou abdos). Tout est chronométré :
 // la séance se joue comme une suite d'étapes (effort / récupération) avec des bips.
 import { hash } from './engine.js';
+import { BY_ID } from './exercises.js';
+import { HOME } from './cible.js';
 
 export const PLACES = {
   salle: ['Salle', '🏋️'], maison: ['Maison', '🏠'], dehors: ['Plein air', '🌳'], plage: ['Plage', '🏖️'],
@@ -18,15 +20,13 @@ export const DEFAULT_EQUIP = {
   maison: [], dehors: ['barre', 'banc'], plage: [],
 };
 export const GOALS_LIBRE = {
-  cardio: ['Cardio', 'Souffle, brûler'], abdos: ['Abdos', 'Sangle abdominale'], muscu: ['Renfo', 'Muscles, circuit'], mixte: ['Mixte', 'Les deux'],
+  cardio: ['Cardio', 'Souffle, brûler'], abdos: ['Abdos', 'Sangle abdominale'],
 };
 export const DURATIONS = [15, 20, 30, 45, 60, 75, 90];
-// Durées proposées selon l'objectif : jusqu'à 1 h 30 en cardio (endurance + intervalles),
-// 1 h en renfo ou mixte (au-delà, un circuit au poids du corps n'apporte plus grand-chose).
+// Durées proposées : jusqu'à 1 h 30 en cardio (endurance + intervalles), 30 min en abdos
+// (au-delà, on répète les mêmes exercices sans bénéfice). La muscu a son propre volet (cible.js).
 export function durationsFor(goal) {
-  // Abdos : au-delà de 30 min, on répète les mêmes exercices sans bénéfice.
-  if (goal === 'abdos') return [15, 20, 30];
-  return DURATIONS.filter((m) => m <= (goal === 'cardio' ? 90 : 60));
+  return goal === 'abdos' ? [15, 20, 30] : DURATIONS;
 }
 
 // kind : force | cardio · group : jambes | poussee | tirage | gainage | complet
@@ -35,33 +35,13 @@ export function durationsFor(goal) {
 // anim  : silhouette animée maison (media/anim/<id>.svg) pour les exercices sans photo.
 export const FREE = [
   // Jambes
-  { id: 'l-squat', name: 'Squat au poids du corps', kind: 'force', group: 'jambes', impact: 'low', diff: 1, photo: 'Bodyweight_Squat', cue: 'Fesses en arrière, talons au sol, descends cuisses parallèles.' },
-  { id: 'l-fentes', name: 'Fentes alternées', kind: 'force', group: 'jambes', impact: 'low', diff: 1, photo: 'Bodyweight_Walking_Lunge', cue: 'Grand pas, genou arrière frôle le sol, buste droit.' },
-  { id: 'l-pont', name: 'Pont fessier', kind: 'force', group: 'jambes', impact: 'low', diff: 1, photo: 'Butt_Lift_Bridge', cue: 'Pousse dans les talons, serre les fessiers 1 s en haut.' },
-  { id: 'l-pont-1j', name: 'Pont fessier une jambe', kind: 'force', group: 'jambes', impact: 'low', diff: 2, photo: 'Single_Leg_Glute_Bridge', cue: 'Bassin bien horizontal, change de jambe à mi-temps.' },
-  { id: 'l-step', name: 'Montées sur banc', kind: 'force', group: 'jambes', equip: 'banc', impact: 'low', diff: 1, photo: 'Step-up_with_Knee_Raise', cue: 'Pied entier sur le banc, monte le genou opposé en haut.' },
   { id: 'l-squat-saute', name: 'Squats sautés', kind: 'cardio', group: 'jambes', impact: 'high', diff: 2, photo: 'Freehand_Jump_Squat', cue: 'Réception souple, genoux dans l’axe, enchaîne.' },
   { id: 'l-fentes-sautees', name: 'Fentes sautées', kind: 'cardio', group: 'jambes', impact: 'high', diff: 3, photo: 'Split_Jump', cue: 'Change de jambe en l’air, atterris en douceur.' },
-  { id: 'l-squat-halteres', name: 'Squat haltères', kind: 'force', group: 'jambes', equip: 'halteres', impact: 'low', diff: 1, photo: 'Dumbbell_Squat', cue: 'Haltères le long du corps, dos droit.' },
-  { id: 'l-rdl-halteres', name: 'Soulevé roumain haltères', kind: 'force', group: 'jambes', equip: 'halteres', impact: 'low', diff: 1, photo: 'Stiff-Legged_Dumbbell_Deadlift', cue: 'Fesses en arrière, haltères frôlent les cuisses.' },
-  { id: 'l-goblet', name: 'Goblet squat', kind: 'force', group: 'jambes', equip: 'kettlebell', impact: 'low', diff: 1, photo: 'Goblet_Squat', cue: 'Charge contre la poitrine, coudes entre les genoux.' },
-  { id: 'l-squat-elastique', name: 'Squat élastique', kind: 'force', group: 'jambes', equip: 'elastique', impact: 'low', diff: 1, photo: 'Squats_-_With_Bands', cue: 'Élastique sous les pieds, mains aux épaules.' },
   // Poussée
-  { id: 'l-pompes', name: 'Pompes', kind: 'force', group: 'poussee', impact: 'low', diff: 2, photo: 'Pushups', cue: 'Corps gainé, poitrine près du sol. Sur les genoux si besoin.' },
-  { id: 'l-pompes-inclinees', name: 'Pompes inclinées', kind: 'force', group: 'poussee', impact: 'low', diff: 1, photo: 'Incline_Push-Up', cue: 'Mains sur un mur, un banc ou une table. Corps droit.' },
-  { id: 'l-pompes-pieds', name: 'Pompes pieds surélevés', kind: 'force', group: 'poussee', equip: 'banc', impact: 'low', diff: 3, photo: 'Push-Ups_With_Feet_Elevated', cue: 'Pieds sur le banc, gainage maximal.' },
-  { id: 'l-dips-banc', name: 'Dips sur banc', kind: 'force', group: 'poussee', equip: 'banc', impact: 'low', diff: 1, photo: 'Bench_Dips', cue: 'Mains au bord du banc, coudes vers l’arrière.' },
-  { id: 'l-dev-halteres', name: 'Développé épaules haltères', kind: 'force', group: 'poussee', equip: 'halteres', impact: 'low', diff: 1, photo: 'Dumbbell_Shoulder_Press', cue: 'Debout, abdos serrés, pousse au-dessus de la tête.' },
-  { id: 'l-dev-elastique', name: 'Développé épaules élastique', kind: 'force', group: 'poussee', equip: 'elastique', impact: 'low', diff: 1, photo: 'Shoulder_Press_-_With_Bands', cue: 'Élastique sous les pieds, pousse sans cambrer.' },
   // Tirage
-  { id: 'l-tractions', name: 'Tractions', kind: 'force', group: 'tirage', equip: 'barre', impact: 'low', diff: 3, photo: 'Pullups', cue: 'Menton au-dessus de la barre, descente contrôlée. Fais ce que tu peux.' },
-  { id: 'l-australien', name: 'Rowing australien', kind: 'force', group: 'tirage', equip: 'barre', impact: 'low', diff: 1, photo: 'Inverted_Row', cue: 'Sous une barre basse, corps droit, tire la poitrine vers la barre.' },
-  { id: 'l-rowing-halteres', name: 'Rowing haltère', kind: 'force', group: 'tirage', equip: 'halteres', impact: 'low', diff: 1, photo: 'One-Arm_Dumbbell_Row', cue: 'Dos plat, tire le coude vers la hanche. Change de bras à mi-temps.' },
-  { id: 'l-ecartes-elastique', name: 'Écartés élastique', kind: 'force', group: 'tirage', equip: 'elastique', impact: 'low', diff: 1, photo: 'Band_Pull_Apart', cue: 'Bras tendus devant, écarte jusqu’à la poitrine.' },
-  { id: 'l-superman', name: 'Superman', kind: 'force', group: 'tirage', impact: 'low', diff: 1, photo: 'Superman', cue: 'À plat ventre, décolle bras et jambes, tiens 2 s.' },
   // Gainage
-  { id: 'l-planche', name: 'Planche', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Plank', cue: 'Corps aligné, fessiers et abdos serrés.' },
-  { id: 'l-planche-lat', name: 'Planche latérale', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Side_Bridge', cue: 'Hanches hautes, change de côté à mi-temps.' },
+  { id: 'plank', name: 'Planche', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Plank', cue: 'Corps aligné, fessiers et abdos serrés.' },
+  { id: 'side-plank', name: 'Planche latérale', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Side_Bridge', cue: 'Hanches hautes, change de côté à mi-temps.' },
   { id: 'l-crunch-velo', name: 'Crunch bicyclette', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Air_Bike', cue: 'Coude vers genou opposé, lentement.' },
   { id: 'l-russian', name: 'Russian twist', kind: 'force', group: 'gainage', impact: 'low', diff: 2, photo: 'Russian_Twist', cue: 'Pieds décollés si possible, tourne les épaules.' },
   { id: 'l-flutter', name: 'Battements de jambes', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Flutter_Kicks', cue: 'Bas du dos collé au sol, petits battements.' },
@@ -70,10 +50,10 @@ export const FREE = [
   { id: 'l-genoux-poitrine', name: 'Genoux-poitrine assis', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Leg_Pull-In', cue: 'Assis, mains derrière, ramène les genoux vers la poitrine puis tends les jambes.' },
   { id: 'l-oblique', name: 'Crunch oblique', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Oblique_Crunches_-_On_The_Floor', cue: 'Sur le côté, genoux pliés, monte l’épaule vers la hanche. Change de côté à mi-temps.' },
   { id: 'l-toe-touch', name: 'Touchers de pieds', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Toe_Touchers', cue: 'Jambes tendues vers le plafond, monte les mains vers les pieds.' },
-  { id: 'l-dead-bug', name: 'Dead bug', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Dead_Bug', cue: 'Dos plaqué au sol, tends bras et jambe opposés lentement.' },
+  { id: 'dead-bug', name: 'Dead bug', kind: 'force', group: 'gainage', impact: 'low', diff: 1, photo: 'Dead_Bug', cue: 'Dos plaqué au sol, tends bras et jambe opposés lentement.' },
   { id: 'l-sit-up', name: 'Sit-up', kind: 'force', group: 'gainage', impact: 'low', diff: 2, photo: '3_4_Sit-Up', cue: 'Pieds au sol, enroule le buste jusqu’à la verticale, redescends lentement.' },
   { id: 'l-jackknife', name: 'Jackknife', kind: 'force', group: 'gainage', impact: 'low', diff: 3, photo: 'Jackknife_Sit-Up', cue: 'Allongé, monte bras et jambes tendus en même temps pour te toucher les pieds.' },
-  { id: 'l-releve-suspendu', name: 'Relevés de jambes suspendu', kind: 'force', group: 'gainage', equip: 'barre', impact: 'low', diff: 2, photo: 'Hanging_Leg_Raise', cue: 'Suspendu, monte les genoux (ou jambes tendues) sans balancer.' },
+  { id: 'hanging-raise', name: 'Relevés de jambes suspendu', kind: 'force', group: 'gainage', equip: 'barre', impact: 'low', diff: 2, photo: 'Hanging_Leg_Raise', cue: 'Suspendu, monte les genoux (ou jambes tendues) sans balancer.' },
   { id: 'l-spell', name: 'Rotations haltère', kind: 'force', group: 'gainage', equip: 'halteres', impact: 'low', diff: 2, photo: 'Spell_Caster', cue: 'Haltère à deux mains, passe-le d’une hanche à l’épaule opposée en pivotant.' },
   { id: 'l-mountain', name: 'Mountain climbers', kind: 'cardio', group: 'gainage', impact: 'low', diff: 1, photo: 'Mountain_Climbers', cue: 'Position de pompe, genoux vers la poitrine en alternance, rapide.' },
   // Cardio complet
@@ -94,25 +74,24 @@ export const FREE = [
   { id: 'l-ours', name: 'Marche de l’ours', kind: 'cardio', group: 'complet', impact: 'low', diff: 2, outdoor: true, photo: null, anim: 'l-ours', cue: 'À quatre pattes, genoux décollés, avance main/pied opposés.' },
 ];
 
+// Un mouvement partagé avec le programme ou la muscu ciblée porte le même nom partout.
+const HOME_NAMES = Object.fromEntries(HOME.map((e) => [e.id, e.name]));
+for (const e of FREE) e.name = BY_ID[e.id]?.name || HOME_NAMES[e.id] || e.name;
+
 // Secondes par répétition à bon rythme (niveau avancé). Sert à donner un objectif de reps
 // pour un effort chronométré. Absent = exercice au temps (gainage, corde, sprint, déplacements…).
 const SEC_PER_REP = {
-  'l-squat': 2.2, 'l-fentes': 2.5, 'l-pont': 2.5, 'l-pont-1j': 3, 'l-step': 2.5, 'l-squat-saute': 2.5,
-  'l-fentes-sautees': 2.2, 'l-squat-halteres': 2.5, 'l-rdl-halteres': 3, 'l-goblet': 2.8, 'l-squat-elastique': 2.3,
-  'l-pompes': 2.5, 'l-pompes-inclinees': 2.2, 'l-pompes-pieds': 3, 'l-dips-banc': 2.5, 'l-dev-halteres': 2.5,
-  'l-dev-elastique': 2.2, 'l-australien': 3, 'l-rowing-halteres': 2.5, 'l-ecartes-elastique': 2.2, 'l-superman': 3,
-  'l-crunch-velo': 1.5, 'l-russian': 1.2, 'l-burpees': 3.5, 'l-jacks': 1, 'l-tuck': 2.5, 'l-patineur': 1.5,
-  'l-swing': 2, 'l-epaule-jete': 3, 'l-saut-longueur': 5, 'l-inchworm': 6,
-  'l-crunch': 2, 'l-crunch-inverse': 2.5, 'l-genoux-poitrine': 2.5, 'l-oblique': 2, 'l-toe-touch': 2,
-  'l-dead-bug': 3, 'l-sit-up': 3, 'l-jackknife': 3, 'l-releve-suspendu': 3, 'l-spell': 2.5,
+  'l-squat-saute': 2.5, 'l-fentes-sautees': 2.2, 'l-crunch-velo': 1.5, 'l-russian': 1.2, 'l-burpees': 3.5,
+  'l-jacks': 1, 'l-tuck': 2.5, 'l-patineur': 1.5, 'l-swing': 2, 'l-epaule-jete': 3, 'l-saut-longueur': 5,
+  'l-inchworm': 6, 'l-crunch': 2, 'l-crunch-inverse': 2.5, 'l-genoux-poitrine': 2.5, 'l-oblique': 2,
+  'l-toe-touch': 2, 'dead-bug': 3, 'l-sit-up': 3, 'l-jackknife': 3, 'hanging-raise': 3, 'l-spell': 2.5,
 };
 // Exercices qui se font vraiment à la durée (position tenue, déplacement, rythme continu).
-export const TIMED_FREE = ['l-planche', 'l-planche-lat', 'l-flutter', 'l-mountain', 'l-pas-chasses', 'l-genoux-hauts', 'l-corde', 'l-sprint', 'l-ours', 'l-footing', 'l-tractions'];
+export const TIMED_FREE = ['plank', 'side-plank', 'l-flutter', 'l-mountain', 'l-pas-chasses', 'l-genoux-hauts', 'l-corde', 'l-sprint', 'l-ours', 'l-footing'];
 const LEVEL_PACE = { debutant: 0.7, intermediaire: 0.85, avance: 1 };
 
 // Objectif affiché pour un effort de `secs` secondes : « ≈ 10–13 reps » ou « au temps ».
 export function repTarget(id, secs, level = 'intermediaire') {
-  if (id === 'l-tractions') return { reps: null, text: 'max de reps propres' };
   const spr = SEC_PER_REP[id];
   if (!spr) return { reps: null, text: 'au temps, sans t’arrêter' };
   const hi = Math.max(2, Math.round((secs / spr) * (LEVEL_PACE[level] || 0.85)));
@@ -166,8 +145,8 @@ export function freePool(opts) {
   return FREE.filter((e) => e.kind !== 'endurance' && (!e.equip || eq.has(e.equip))
     && (!e.outdoor || space)
     && e.diff <= lvl + 1
-    // Sauts : jamais si impact faible demandé (IMC élevé, genoux), et seulement les plus simples pour un débutant.
-    && !(e.impact === 'high' && (opts.lowImpact || (lvl === 1 && e.diff > 1))));
+    // Sauts : jamais pour un débutant ni si impact faible demandé (IMC élevé) — même règle que le programme.
+    && !(e.impact === 'high' && (opts.lowImpact || lvl === 1)));
 }
 
 // Petit générateur pseudo-aléatoire déterministe : même graine = même séance.
@@ -187,19 +166,6 @@ function pickOne(cands, rand) {
   const equipped = cands.filter((e) => e.equip);
   const list = equipped.length && rand() < 0.75 ? equipped : cands;
   return shuffle(list, rand)[0];
-}
-// Circuit renfo : un exercice par groupe (jambes, poussée, tirage, gainage, jambes).
-function forceCircuit(pool, rand, used, n) {
-  const order = ['jambes', 'poussee', 'tirage', 'gainage', 'jambes'].slice(0, n);
-  const out = [];
-  for (const g of order) {
-    const free = (e) => e.kind === 'force' && !out.includes(e);
-    const c = pickOne(pool.filter((e) => free(e) && e.group === g && !used.has(e.id)), rand)
-      || pickOne(pool.filter((e) => free(e) && e.group === g), rand)
-      || pickOne(pool.filter(free), rand);
-    if (c) out.push(c);
-  }
-  return out;
 }
 function cardioCircuit(pool, rand, used, n) {
   const cardio = pool.filter((e) => e.kind === 'cardio');
@@ -255,9 +221,7 @@ export function buildFreeSession(opts, seed = 0) {
 
   // Ordre des blocs selon l'objectif (on en prend autant que le temps permet).
   const plan = opts.goal === 'abdos' ? ['abdos', 'abdos', 'abdos', 'abdos']
-    : opts.goal === 'muscu' ? ['force', 'force', 'force', 'force', 'force']
-    : opts.goal === 'cardio' ? (machines.length ? ['machine', 'cardio', 'machine', 'cardio', 'tabata'] : ['cardio', 'tabata', 'cardio', 'tabata', 'cardio'])
-      : ['force', machines.length ? 'machine' : 'cardio', 'force', 'tabata', 'force'];
+    : (machines.length ? ['machine', 'cardio', 'machine', 'cardio', 'tabata'] : ['cardio', 'tabata', 'cardio', 'tabata', 'cardio']);
   const nBlocks = Math.max(1, Math.min(plan.length, Math.round(budget / ((opts.goal === 'abdos' ? 8 : 9) * 60))));
 
   for (const type of plan.slice(0, nBlocks)) {
@@ -282,17 +246,14 @@ export function buildFreeSession(opts, seed = 0) {
       // Tabata : 8 × (20 s / 10 s), les deux exercices en alternance. Durée fixe.
       blocks.push({ type, name: 'Tabata', work: 20, rest: 10, perRound: 2, roundRest: 0, rounds: 4, maxRounds: 4, exercises: ex });
     } else {
-      const isForce = type === 'force';
-      // Pas de 3e circuit du même type s'il ne reste presque que des exercices déjà faits :
-      // on ajoute plutôt des tours aux circuits existants.
-      const kindPool = pool.filter((e) => e.kind === (isForce ? 'force' : 'cardio'));
-      const fresh = kindPool.filter((e) => !used.has(e.id)).length;
-      if (blocks.filter((x) => x.type === (isForce ? 'force' : 'cardio')).length >= 2 && fresh < 3) continue;
-      const ex = isForce ? forceCircuit(pool, rand, used, n) : cardioCircuit(pool, rand, used, n);
+      // Circuit cardio (tabata débutant inclus). Pas de 3e circuit s'il ne reste presque que des
+      // exercices déjà faits : on ajoute plutôt des tours aux circuits existants.
+      const fresh = pool.filter((e) => e.kind === 'cardio' && !used.has(e.id)).length;
+      if (blocks.filter((x) => x.type === 'cardio').length >= 2 && fresh < 3) continue;
+      const ex = cardioCircuit(pool, rand, used, n);
       if (ex.length < 2) continue;
       ex.forEach((e) => used.add(e.id));
-      blocks.push({ type: isForce ? 'force' : 'cardio', name: isForce ? 'Circuit renfo' : 'Circuit cardio',
-        work: isForce ? pace.work : Math.min(pace.work, 40), rest: isForce ? pace.rest : Math.max(pace.rest, 20),
+      blocks.push({ type: 'cardio', name: 'Circuit cardio', work: Math.min(pace.work, 40), rest: Math.max(pace.rest, 20),
         perRound: ex.length, roundRest: 60, rounds: 1, maxRounds: pace.rounds[1] + (opts.minutes >= 60 ? 2 : 1), exercises: ex });
     }
   }
