@@ -92,3 +92,47 @@ test('chaque exercice ciblé a une image, des repères et des données complète
   }
   for (const e of HOME) assert.ok(ALL_TARGET_EXERCISES().includes(e), `${e.id} n’est dans aucune zone`);
 });
+
+// ---------- Superset ----------
+import { buildSuperset, CLASSIC_PAIRS, SUPERSET_TRANSITION } from '../js/cible.js';
+
+test('superset : paires A/B qui alternent les 2 muscles, repos court après A', () => {
+  for (const [a, b] of CLASSIC_PAIRS) for (const minutes of CIBLE_DURATIONS) {
+    const s = buildSuperset(profile(), { muscles: [a, b], place: 'salle', equip: [], minutes }, [], 0);
+    assert.ok(s.minutes <= minutes, `${a}+${b} ${minutes} → ${s.minutes}`);
+    for (const z of s.zones.filter((x) => x.zone.id.startsWith('ss'))) {
+      const [x, y] = z.exercises;
+      assert.equal(x.muscle, a); assert.equal(y.muscle, b);
+      assert.equal(x.superset, 'A'); assert.equal(y.superset, 'B');
+      assert.equal(x.rest, SUPERSET_TRANSITION); assert.ok(y.rest >= 90);
+      assert.equal(x.sets, y.sets);
+      assert.equal(y.slot, x.slot + 1, 'B juste après A (minuteur « Enchaîne »)');
+    }
+    const ids = s.exercises.map((e) => e.id);
+    assert.equal(new Set(ids).size, ids.length);
+  }
+});
+
+test('superset : plafond de séries respecté pour chacun des 2 muscles', () => {
+  for (const [a, b] of CLASSIC_PAIRS) {
+    const s = buildSuperset(profile(), { muscles: [a, b], place: 'salle', equip: [], minutes: 90 }, [], 0);
+    const count = (m) => s.exercises.filter((e) => e.muscle === m).reduce((n, e) => n + e.sets, 0);
+    assert.ok(count(a) <= MUSCLES[a].cap && count(b) <= MUSCLES[b].cap, `${a} ${count(a)} / ${b} ${count(b)}`);
+  }
+});
+
+test('superset : plus de travail que la séance d’un seul muscle dans le même temps', () => {
+  const one = buildTargeted(profile(), { muscle: 'pecs', place: 'salle', equip: [], minutes: 45 }, [], 0);
+  const ss = buildSuperset(profile(), { muscles: ['pecs', 'dos'], place: 'salle', equip: [], minutes: 45 }, [], 0);
+  assert.ok(ss.sets > one.sets, `${ss.sets} séries en superset vs ${one.sets}`);
+});
+
+test('superset : matériel respecté hors salle, et rempli à au moins 70 % quand il y a de quoi faire', () => {
+  for (const o of cases()) {
+    if (o.place === 'salle' || o.muscle === 'jambes') continue;
+    const s = buildSuperset(profile(o.level), { ...o, muscles: [o.muscle, 'jambes'] }, [], 0);
+    for (const e of s.exercises) assert.ok(available(exById(e.id), o.place, o.equip), e.id);
+  }
+  const s = buildSuperset(profile(), { muscles: ['pecs', 'dos'], place: 'maison', equip: ['halteres', 'banc', 'elastique', 'barre'], minutes: 45 }, [], 0);
+  assert.ok(s.minutes >= 45 * 0.7, `${s.minutes} min`);
+});

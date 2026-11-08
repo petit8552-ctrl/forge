@@ -9,7 +9,7 @@ import * as Sync from './sync.js';
 import { buildFreeSession, blockGuide, repTarget, durationsFor, PLACES, EQUIP, MACHINES, DEFAULT_EQUIP } from './libre.js';
 import { badges, newBadges, weekStreak } from './rewards.js';
 import { howto } from './coaching.js';
-import { buildTargeted, nextInZone, swapExercise, MUSCLES, CIBLE_EQUIP, CIBLE_DURATIONS, CIBLE_DEFAULT_EQUIP } from './cible.js';
+import { buildTargeted, buildSuperset, nextInZone, swapExercise, MUSCLES, CIBLE_EQUIP, CIBLE_DURATIONS, CIBLE_DEFAULT_EQUIP, CLASSIC_PAIRS } from './cible.js';
 
 // ---------- État persistant ----------
 const KEY = 'forge.v1';
@@ -430,7 +430,11 @@ function bindSetControls(data, exList) {
       st.done = !st.done;
       btn.closest('.set').classList.toggle('done', st.done);
       save();
-      if (st.done) startTimer(ex.rest, ex.name);
+      if (st.done) {
+        // Superset : après A, court délai pour passer à B ; le vrai repos vient après B.
+        const partner = ex.superset === 'A' ? exList.find((x) => x.slot === ex.slot + 1) : null;
+        startTimer(ex.rest, partner ? `Enchaîne : ${partner.name}` : ex.name);
+      }
     };
   });
 }
@@ -448,7 +452,7 @@ function exerciseCard(e, i, d, locked) {
     <div class="ex-meta">
       <span class="pill accent">${e.sets} × ${range} ${unit}</span>
       <span class="pill">RIR ${e.rir}</span>
-      <span class="pill">Repos ${e.rest >= 120 ? (e.rest / 60).toString().replace('.', ',') + ' min' : e.rest + ' s'}</span>
+      <span class="pill">${e.restLabel ? esc(e.restLabel) : `Repos ${e.rest >= 120 ? (e.rest / 60).toString().replace('.', ',') + ' min' : e.rest + ' s'}`}</span>
       ${e.load ? `<span class="pill">${e.assisted ? 'Assistance ' : ''}${kg(e.load)}${e.unit === 'halteres' ? ' / haltère' : ''}</span>` : ''}
     </div>
     ${mediaBlock(e)}
@@ -555,7 +559,7 @@ function startTimer(seconds, label) {
   keepAwake(true);
   const paint = () => {
     const m = Math.floor(left / 60); const sec = String(left % 60).padStart(2, '0');
-    $timer.innerHTML = `<div class="t">${m}:${sec}</div><div class="grow small"><b>Repos</b><div class="muted">${esc(label)}</div></div>
+    $timer.innerHTML = `<div class="t">${m}:${sec}</div><div class="grow small"><b>${label.startsWith('Enchaîne') ? 'Change de poste' : 'Repos'}</b><div class="muted">${esc(label)}</div></div>
       <button class="btn sm ghost" id="tsound" aria-label="${soundOn() ? 'Couper le son' : 'Activer le son'}">${soundOn() ? '🔔' : '🔕'}</button>
       <button class="btn sm ghost" id="tplus">+30 s</button><button class="btn sm primary" id="tskip">Passer</button>`;
     $timer.querySelector('#tplus').onclick = () => { startTimer(left + 30, label); };
@@ -665,6 +669,8 @@ function cibleOpts() {
   const place = c.place || 'salle';
   return {
     muscle: MUSCLES[c.muscle] ? c.muscle : 'pecs', place,
+    mode: c.mode === 'superset' ? 'superset' : 'un',
+    muscles: (c.muscles || []).filter((m) => MUSCLES[m]).slice(0, 2),
     equip: c.equip || [...CIBLE_DEFAULT_EQUIP[place]],
     minutes: CIBLE_DURATIONS.includes(c.minutes) ? c.minutes : 60, seed: c.seed || 0,
   };
@@ -678,10 +684,21 @@ function cibleResume() {
 function renderCibleSetup() {
   const p = state.profile;
   const o = cibleOpts();
-  const plan = buildTargeted(p, o, state.history, o.seed);
+  const ss = o.mode === 'superset';
+  const ready = !ss || o.muscles.length === 2;
+  const plan = ss ? (ready ? buildSuperset(p, o, state.history, o.seed) : null) : buildTargeted(p, o, state.history, o.seed);
   const m = MUSCLES[o.muscle];
   const chip = (group, val, on, label, sub) => `<button type="button" class="chip ${on ? 'on' : ''}" data-g="${group}" data-val="${val}">${label}${sub ? `<small>${sub}</small>` : ''}</button>`;
-  const empty = !plan.exercises.length;
+  const empty = !plan || !plan.exercises.length;
+  const muscleChip = (k, x) => ss
+    ? chip('muscle', k, o.muscles.includes(k), `${x.icon} ${x.name}${o.muscles.indexOf(k) >= 0 ? ` <b>${'AB'[o.muscles.indexOf(k)]}</b>` : ''}`)
+    : chip('muscle', k, o.muscle === k, `${x.icon} ${x.name}`);
+  const head = ss
+    ? (ready ? `${MUSCLES[o.muscles[0]].icon} ${esc(MUSCLES[o.muscles[0]].name)} + ${MUSCLES[o.muscles[1]].icon} ${esc(MUSCLES[o.muscles[1]].name)}` : 'Superset')
+    : `${m.icon} ${esc(m.name)}`;
+  const capText = !plan || !plan.capped ? ''
+    : ss ? `⏱ ${plan.minutes} min au lieu de ${fmtMin(o.minutes)} : au-delà, l’un des deux muscles dépasserait le nombre de séries utile pour une séance.`
+      : `⏱ ${plan.minutes} min au lieu de ${fmtMin(o.minutes)} : au-delà d’environ ${m.cap} séries, travailler encore ${esc(m.the)} dans la même séance n’apporte presque plus rien et retarde la récupération. Ajoute un autre muscle ou du cardio si tu as le temps.`;
   $app.innerHTML = `
     <div class="eyebrow">Hors programme</div><h1>Séance libre</h1>
     ${cibleResume()}
@@ -690,16 +707,20 @@ function renderCibleSetup() {
     <div class="card">
       <label class="field"><span>Où ?</span><div class="chips">${Object.entries(PLACES).map(([k, [l, ic]]) => chip('place', k, o.place === k, `${ic} ${l}`)).join('')}</div></label>
       ${o.place === 'salle' ? '' : `<label class="field"><span>Ton matériel</span><div class="chips">${Object.entries(CIBLE_EQUIP).map(([k, l]) => chip('equip', k, o.equip.includes(k), l)).join('')}</div></label>`}
-      <label class="field"><span>Quel muscle ?</span><div class="chips">${Object.entries(MUSCLES).map(([k, x]) => chip('muscle', k, o.muscle === k, `${x.icon} ${x.name}`)).join('')}</div></label>
+      <label class="field"><span>Type de séance</span><div class="chips">${chip('mode', 'un', !ss, 'Un muscle', 'Zone par zone')}${chip('mode', 'superset', ss, 'Superset', '2 muscles en alternance')}</div></label>
+      <label class="field"><span>${ss ? 'Quels muscles ? (2)' : 'Quel muscle ?'}</span><div class="chips">${Object.entries(MUSCLES).map(([k, x]) => muscleChip(k, x)).join('')}</div>
+        ${ss ? `<small class="muted">Classiques : ${CLASSIC_PAIRS.map(([a, b]) => `<button type="button" class="linklike" data-pair="${a},${b}">${esc(MUSCLES[a].name)} + ${esc(MUSCLES[b].name)}</button>`).join(' · ')}</small>` : ''}</label>
       <label class="field"><span>Durée</span><div class="chips">${CIBLE_DURATIONS.map((d) => chip('minutes', d, o.minutes === d, fmtMin(d))).join('')}</div></label>
     </div>
     <div class="card hero">
       <div class="row between"><div class="eyebrow">Ta séance</div>${empty ? '' : `<span class="pill">≈ ${plan.minutes} min · ${plan.sets} séries</span>`}</div>
-      <h2 style="margin:6px 0 10px">${m.icon} ${esc(m.name)}</h2>
-      ${plan.capped ? `<p class="small guide">⏱ ${plan.minutes} min au lieu de ${fmtMin(o.minutes)} : au-delà d’environ ${m.cap} séries, travailler encore ${esc(m.the)} dans la même séance n’apporte presque plus rien et retarde la récupération. Ajoute un autre muscle ou du cardio si tu as le temps.</p>` : ''}
-      ${empty ? `<p class="guide">Sans matériel, on ne peut pas travailler correctement ce muscle. Coche au moins : ${esc([...new Set(plan.zones.flatMap((z) => z.missing || []))].join(', '))}.</p>` : ''}
+      <h2 style="margin:6px 0 10px">${head}</h2>
+      ${ss && ready && !empty ? '<p class="small guide">Fais A, puis tout de suite B (15 s pour changer de poste), puis récupère. Un muscle travaille pendant que l’autre se repose : plus de travail dans le même temps.</p>' : ''}
+      ${capText ? `<p class="small guide">${capText}</p>` : ''}
+      ${ss && !ready ? '<p class="guide">Choisis un 2e muscle pour composer tes supersets.</p>'
+        : empty ? `<p class="guide">Sans matériel, on ne peut pas travailler correctement ${ss ? 'ces muscles' : 'ce muscle'}. Coche plus de matériel${plan && !ss ? ` : ${esc([...new Set(plan.zones.flatMap((z) => z.missing || []))].join(', '))}` : ''}.</p>` : ''}
       <div class="tip small"><div>Échauffement · 5 min <div class="muted">Cardio léger, puis 2 séries légères sur le premier exercice.</div></div></div>
-      ${plan.zones.map((z, zi) => `<div class="tip small"><div><b>${zi + 1}. ${esc(z.zone.name)}</b>
+      ${(plan ? plan.zones : []).map((z, zi) => `<div class="tip small"><div><b>${ss ? '' : `${zi + 1}. `}${esc(z.zone.name)}</b>
         <p class="guide">${esc(z.zone.desc)}</p>
         ${z.exercises.length ? `<div class="freeex-list">${z.exercises.map((e) => ciblePreview(e)).join('')}</div>`
           : `<p class="muted" style="margin:4px 0 0">Pas d’exercice possible ici avec ton matériel${z.missing && z.missing.length ? ` (il faudrait : ${esc(z.missing.join(' ou '))})` : ''}.</p>`}</div></div>`).join('')}
@@ -712,12 +733,17 @@ function renderCibleSetup() {
     if (g === 'place') set({ place: val, equip: [...CIBLE_DEFAULT_EQUIP[val]], seed: 0 });
     else if (g === 'equip') set({ equip: o.equip.includes(val) ? o.equip.filter((x) => x !== val) : [...o.equip, val], seed: 0 });
     else if (g === 'minutes') set({ minutes: +val, seed: 0 });
-    else set({ [g]: val, seed: 0 });
+    else if (g === 'muscle' && ss) {
+      // Superset : 2 muscles max ; un 3e remplace le plus ancien.
+      const cur = o.muscles.includes(val) ? o.muscles.filter((x) => x !== val) : [...o.muscles, val].slice(-2);
+      set({ muscles: cur, seed: 0 });
+    } else set({ [g]: val, seed: 0 });
   }));
+  $app.querySelectorAll('[data-pair]').forEach((b) => b.addEventListener('click', () => set({ muscles: b.dataset.pair.split(','), seed: 0 })));
   $app.querySelector('#reroll').onclick = () => set({ seed: o.seed + 1 });
   $app.querySelector('#go').onclick = () => {
     if (state.cible?.active && !confirm('Une séance ciblée est déjà en cours. La remplacer ?')) return;
-    const session = buildTargeted(p, o, state.history, o.seed);
+    const session = ss ? buildSuperset(p, o, state.history, o.seed) : buildTargeted(p, o, state.history, o.seed);
     const draft = { exercises: Object.fromEntries(session.exercises.map((e) => [e.slot, { id: e.id, sets: Array.from({ length: e.sets }, () => ({ w: e.load ?? '', r: '', done: false })) }])) };
     state.cible = { ...state.cible, ...o, active: session, draft, opts: o };
     saveLocal();
@@ -727,7 +753,7 @@ function renderCibleSetup() {
 // Fiche dépliable d'un exercice ciblé : séries × reps, charge, photos, repères.
 function ciblePreview(e) {
   const range = e.repsMin === e.repsMax ? `${e.repsMin}` : `${e.repsMin}–${e.repsMax}`;
-  return `<details class="freeex"><summary><span>${esc(e.name)}</span><span class="muted small dose">${e.sets} × ${range}${e.load ? ` · ${kg(e.load)}` : ''}</span></summary>
+  return `<details class="freeex"><summary><span>${e.superset ? `<span class="num">${e.superset}</span>` : ''}${esc(e.name)}</span><span class="muted small dose">${e.sets} × ${range}${e.load ? ` · ${kg(e.load)}` : ''}</span></summary>
     ${mediaBlock(e)}<div class="ex-cue">${esc(e.cue)}${howtoBlock(e.id)}</div></details>`;
 }
 function renderCibleSession() {
@@ -740,8 +766,8 @@ function renderCibleSession() {
   let n = 0;
   $app.innerHTML = `
     <a class="small muted" href="#/libre">‹ Séance libre</a>
-    <div class="eyebrow" style="margin-top:10px">Muscu ciblée · ${esc(PLACES[s.place][0])}</div>
-    <h1>${esc(MUSCLES[s.muscle].icon)} ${esc(MUSCLES[s.muscle].name)}</h1>
+    <div class="eyebrow" style="margin-top:10px">${s.mode === 'superset' ? 'Superset' : 'Muscu ciblée'} · ${esc(PLACES[s.place][0])}</div>
+    <h1>${s.mode === 'superset' ? s.muscles.map((k) => `${MUSCLES[k].icon} ${esc(MUSCLES[k].name)}`).join(' + ') : `${MUSCLES[s.muscle].icon} ${esc(MUSCLES[s.muscle].name)}`}</h1>
     <div class="row wrap" style="margin:8px 0 14px"><span class="pill">≈ ${s.minutes} min</span><span class="pill">${s.exercises.length} exercices · ${s.sets} séries</span></div>
     <div class="card"><h3>Échauffement · 5 min</h3><p class="small muted" style="margin:6px 0 0">5 min de cardio léger, quelques mouvements articulaires, puis 2 séries légères (environ 50 % puis 70 % de la charge) sur le premier exercice.</p></div>
     ${s.zones.filter((z) => z.exercises.length).map((z) => `<div class="zone-head"><h2>${esc(z.zone.name)}</h2><p class="small muted">${esc(z.zone.desc)}</p></div>
@@ -774,7 +800,8 @@ function renderCibleSession() {
     const doneSets = exercises.reduce((k, e) => k + e.sets.filter((x) => x.done).length, 0);
     if (!doneSets && !confirm('Aucune série cochée. Enregistrer quand même ?')) return;
     const before = [...state.history];
-    state.history.push({ type: 'cible', muscle: s.muscle, place: s.place, name: `${MUSCLES[s.muscle].name} (ciblée)`, minutes: s.minutes, date: new Date().toISOString(), exercises });
+    const name = s.mode === 'superset' ? `${s.muscles.map((k) => MUSCLES[k].name).join(' + ')} (superset)` : `${MUSCLES[s.muscle].name} (ciblée)`;
+    state.history.push({ type: 'cible', muscle: s.mode === 'superset' ? s.muscles.join('+') : s.muscle, place: s.place, name, minutes: s.minutes, date: new Date().toISOString(), exercises });
     state.cible.active = null; state.cible.draft = null;
     state.cible.seed = (state.cible.seed || 0) + 1;
     stopTimer(); save();
