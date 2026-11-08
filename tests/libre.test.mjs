@@ -39,14 +39,13 @@ test('n’utilise que le matériel coché et l’espace disponible', () => {
   }
 });
 
-test('débutant : pas de sauts difficiles ; impact faible : aucun saut', () => {
+test('débutant ou impact faible : aucun saut (même règle que le programme)', () => {
   for (const o of allCases()) {
-    if (o.level === 'debutant') for (const st of buildFreeSession(o, 3).steps.filter((x) => BY[x.exId])) {
-      const e = BY[st.exId];
-      assert.ok(!(e.impact === 'high' && e.diff > 1), `${e.id} pour un débutant`);
-    }
-    for (const st of buildFreeSession({ ...o, lowImpact: true }, 3).steps.filter((x) => BY[x.exId])) {
-      assert.notEqual(BY[st.exId].impact, 'high', `${st.exId} malgré impact faible`);
+    for (const lowImpact of [false, true]) {
+      if (o.level !== 'debutant' && !lowImpact) continue;
+      for (const st of buildFreeSession({ ...o, lowImpact }, 3).steps.filter((x) => BY[x.exId])) {
+        assert.notEqual(BY[st.exId].impact, 'high', `${st.exId} pour ${o.level}${lowImpact ? ' (impact faible)' : ''}`);
+      }
     }
   }
 });
@@ -59,7 +58,7 @@ test('chaque séance a un vrai contenu (au moins 6 étapes d’effort hors écha
 });
 
 test('même graine = même séance ; autre graine = autre séance', () => {
-  const o = { place: 'plage', goal: 'mixte', minutes: 30, level: 'intermediaire', equip: [] };
+  const o = { place: 'plage', goal: 'cardio', minutes: 30, level: 'intermediaire', equip: [] };
   assert.deepEqual(buildFreeSession(o, 7), buildFreeSession(o, 7));
   const ids = (s) => s.steps.map((x) => x.exId).join();
   const variants = new Set([1, 2, 3, 4, 5].map((k) => ids(buildFreeSession(o, k))));
@@ -97,10 +96,10 @@ test('mode d’emploi de chaque bloc : clair et cohérent avec la séance', asyn
   }
 });
 
-test('durées : cardio jusqu’à 1 h 30, renfo et mixte jusqu’à 1 h', () => {
+test('durées : cardio jusqu’à 1 h 30, abdos jusqu’à 30 min', () => {
   assert.equal(Math.max(...durationsFor('cardio')), 90);
-  assert.equal(Math.max(...durationsFor('muscu')), 60);
-  assert.equal(Math.max(...durationsFor('mixte')), 60);
+  assert.equal(Math.max(...durationsFor('abdos')), 30);
+  assert.deepEqual(Object.keys(GOALS_LIBRE), ['cardio', 'abdos']);
 });
 
 test('cardio long : commence par un bloc d’endurance, footing seulement dehors ou à la plage', () => {
@@ -116,8 +115,8 @@ test('cardio long : commence par un bloc d’endurance, footing seulement dehors
 test('objectif de reps : cohérent avec la durée et le niveau ; au temps pour le gainage', () => {
   const deb = repTarget('l-burpees', 40, 'debutant').reps; const av = repTarget('l-burpees', 40, 'avance').reps;
   assert.ok(deb[1] < av[1] && av[1] <= 12, `${deb} / ${av}`);
-  assert.ok(repTarget('l-squat', 40, 'avance').reps[1] > repTarget('l-squat', 20, 'avance').reps[1]);
-  assert.equal(repTarget('l-planche', 40).reps, null);
+  assert.ok(repTarget('l-crunch', 40, 'avance').reps[1] > repTarget('l-crunch', 20, 'avance').reps[1]);
+  assert.equal(repTarget('plank', 40).reps, null);
   assert.equal(repTarget('l-corde', 40).reps, null);
 });
 

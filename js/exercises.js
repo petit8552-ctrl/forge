@@ -34,7 +34,7 @@ export const EXERCISES = [
 
   // Poussée verticale
   { id: 'ohp', name: 'Développé militaire barre', pattern: 'vpush', kind: 'compound', diff: 2, coef: 0.45, unit: 'barre', muscles: ['épaules', 'triceps'], cue: 'Debout, fessiers serrés, la tête passe sous la barre en fin de poussée.' },
-  { id: 'db-press', name: 'Développé épaules haltères assis', pattern: 'vpush', kind: 'compound', diff: 1, coef: 0.18, unit: 'halteres', muscles: ['épaules', 'triceps'], cue: 'Dossier presque vertical, coudes légèrement devant le corps.' },
+  { id: 'db-press', name: 'Développé épaules haltères', pattern: 'vpush', kind: 'compound', diff: 1, coef: 0.18, unit: 'halteres', muscles: ['épaules', 'triceps'], cue: 'Dossier presque vertical, coudes légèrement devant le corps.' },
   { id: 'arnold', name: 'Arnold press', pattern: 'vpush', kind: 'compound', diff: 2, coef: 0.15, unit: 'halteres', muscles: ['épaules', 'triceps'], cue: 'Rotation des poignets pendant la montée, mouvement fluide.' },
   { id: 'shoulder-machine', name: 'Développé épaules machine', pattern: 'vpush', kind: 'compound', diff: 1, coef: 0.4, unit: 'machine', muscles: ['épaules', 'triceps'], cue: 'Poignées à hauteur d’oreilles au départ.' },
 
@@ -56,7 +56,7 @@ export const EXERCISES = [
   { id: 'leg-ext', name: 'Leg extension', pattern: 'quad', kind: 'iso', diff: 1, coef: 0.5, unit: 'machine', muscles: ['quadriceps'], cue: 'Contraction 1 s en haut, descente lente.' },
   { id: 'lunges', name: 'Fentes marchées haltères', pattern: 'quad', kind: 'compound', diff: 2, coef: 0.15, unit: 'halteres', muscles: ['quadriceps', 'fessiers'], cue: 'Grand pas, genou arrière frôle le sol.' },
   { id: 'step-up', name: 'Step-up sur banc', pattern: 'quad', kind: 'compound', diff: 1, coef: 0.15, unit: 'halteres', muscles: ['quadriceps', 'fessiers'], cue: 'Pousse uniquement avec la jambe sur le banc.' },
-  { id: 'sissy-presse', name: 'Presse unilatérale', pattern: 'quad', kind: 'compound', diff: 1, coef: 0.7, unit: 'machine', muscles: ['quadriceps', 'fessiers'], cue: 'Une jambe à la fois, pied au centre de la plateforme.' },
+  { id: 'sissy-presse', anim: 'sissy-presse', name: 'Presse unilatérale', pattern: 'quad', kind: 'compound', diff: 1, coef: 0.7, unit: 'machine', muscles: ['quadriceps', 'fessiers'], cue: 'Une jambe à la fois, pied au centre de la plateforme.' },
 
   // Ischios
   { id: 'lying-curl', name: 'Leg curl allongé', pattern: 'ham', kind: 'iso', diff: 1, coef: 0.35, unit: 'machine', muscles: ['ischios'], cue: 'Bassin collé au banc, descente en 3 s.' },
@@ -81,7 +81,7 @@ export const EXERCISES = [
   // Deltoïdes latéraux
   { id: 'lat-raise', name: 'Élévations latérales haltères', pattern: 'lateral', kind: 'iso', diff: 1, coef: 0.07, unit: 'halteres', muscles: ['épaules'], cue: 'Monte jusqu’à l’horizontale, coudes légèrement fléchis, sans élan.' },
   { id: 'cable-lat', name: 'Élévation latérale poulie', pattern: 'lateral', kind: 'iso', diff: 1, coef: 0.05, unit: 'poulie', muscles: ['épaules'], cue: 'Un bras à la fois, câble derrière le corps.' },
-  { id: 'machine-lat', name: 'Élévations latérales machine', pattern: 'lateral', kind: 'iso', diff: 1, coef: 0.25, unit: 'machine', muscles: ['épaules'], cue: 'Coudes contre les appuis, montée lente.' },
+  { id: 'machine-lat', anim: 'machine-lat', name: 'Élévations latérales machine', pattern: 'lateral', kind: 'iso', diff: 1, coef: 0.25, unit: 'machine', muscles: ['épaules'], cue: 'Coudes contre les appuis, montée lente.' },
 
   // Arrière d'épaule
   { id: 'face-pull', name: 'Face pull', pattern: 'rear', kind: 'iso', diff: 1, coef: 0.25, unit: 'poulie', muscles: ['épaules', 'dos'], cue: 'Corde à hauteur des yeux, écarte les mains en tirant.' },
@@ -103,12 +103,12 @@ export const EXERCISES = [
   { id: 'close-bench', name: 'Développé couché prise serrée', pattern: 'triceps', kind: 'compound', diff: 2, coef: 0.6, unit: 'barre', muscles: ['triceps', 'pectoraux'], cue: 'Mains largeur d’épaules, coudes près du corps.' },
 
   // Gainage / abdos
-  { id: 'plank', name: 'Gainage planche', pattern: 'core', kind: 'iso', diff: 1, coef: 0, unit: 'pdc', timed: true, muscles: ['abdos'], cue: 'Corps aligné, serre fessiers et abdos. Répétitions = secondes.' },
+  { id: 'plank', name: 'Planche', pattern: 'core', kind: 'iso', diff: 1, coef: 0, unit: 'pdc', timed: true, muscles: ['abdos'], cue: 'Corps aligné, serre fessiers et abdos. Répétitions = secondes.' },
   { id: 'hanging-raise', name: 'Relevé de jambes suspendu', pattern: 'core', kind: 'iso', diff: 2, bw: true, coef: 0, unit: 'pdc', muscles: ['abdos'], cue: 'Enroule le bassin, ne balance pas.' },
   { id: 'cable-crunch', name: 'Crunch poulie haute', pattern: 'core', kind: 'iso', diff: 1, coef: 0.4, unit: 'poulie', muscles: ['abdos'], cue: 'À genoux, enroule la colonne, les hanches restent fixes.' },
   { id: 'ab-wheel', name: 'Roue abdominale', pattern: 'core', kind: 'iso', diff: 2, coef: 0, unit: 'pdc', muscles: ['abdos'], cue: 'Commence à genoux, dos jamais creusé.' },
   { id: 'pallof', name: 'Pallof press', pattern: 'core', kind: 'iso', diff: 1, coef: 0.15, unit: 'poulie', muscles: ['abdos'], cue: 'Résiste à la rotation, bras tendus 2 s.' },
-  { id: 'side-plank', name: 'Gainage latéral', pattern: 'core', kind: 'iso', diff: 1, coef: 0, unit: 'pdc', timed: true, muscles: ['abdos'], cue: 'Hanches hautes, chaque côté. Répétitions = secondes.' },
+  { id: 'side-plank', name: 'Planche latérale', pattern: 'core', kind: 'iso', diff: 1, coef: 0, unit: 'pdc', timed: true, muscles: ['abdos'], cue: 'Hanches hautes, chaque côté. Répétitions = secondes.' },
   { id: 'dead-bug', name: 'Dead bug', pattern: 'core', kind: 'iso', diff: 1, coef: 0, unit: 'pdc', muscles: ['abdos'], cue: 'Bas du dos plaqué au sol, mouvements lents bras et jambe opposés.' },
 ];
 

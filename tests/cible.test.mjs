@@ -136,3 +136,28 @@ test('superset : matériel respecté hors salle, et rempli à au moins 70 % quan
   const s = buildSuperset(profile(), { muscles: ['pecs', 'dos'], place: 'maison', equip: ['halteres', 'banc', 'elastique', 'barre'], minutes: 45 }, [], 0);
   assert.ok(s.minutes >= 45 * 0.7, `${s.minutes} min`);
 });
+
+test('pas de doublon d’exercice entre volets : une photo = un seul identifiant', async () => {
+  const { EXERCISES } = await import('../js/exercises.js');
+  const { MEDIA } = await import('../js/media.js');
+  const { FREE } = await import('../js/libre.js');
+  const byPhoto = {};
+  const add = (id, photo) => { if (photo) (byPhoto[photo] = byPhoto[photo] || new Set()).add(id); };
+  for (const e of EXERCISES) add(e.id, MEDIA[e.id]?.src);
+  for (const e of FREE) add(e.id, e.photo);
+  for (const e of HOME) add(e.id, e.photo);
+  const dup = Object.entries(byPhoto).filter(([, ids]) => ids.size > 1).map(([ph, ids]) => `${ph}: ${[...ids]}`);
+  assert.deepEqual(dup, []);
+});
+
+test('aucun superset ne contient deux fois le même exercice (toutes les paires, tous les lieux)', () => {
+  const ms = Object.keys(MUSCLES);
+  for (const a of ms) for (const b of ms) {
+    if (a === b) continue;
+    for (const place of PLACES) {
+      const s = buildSuperset(profile(), { muscles: [a, b], place, equip: Object.keys(CIBLE_EQUIP), minutes: 90 }, [], 0);
+      const ids = s.exercises.map((e) => e.id);
+      assert.equal(new Set(ids).size, ids.length, `${a}+${b} ${place}`);
+    }
+  }
+});
