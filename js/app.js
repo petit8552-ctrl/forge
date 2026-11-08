@@ -6,9 +6,10 @@ import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { BY_ID, PATTERN_LABEL } from './exercises.js';
 import { photos, videoUrl } from './media.js';
 import * as Sync from './sync.js';
-import { buildFreeSession, blockGuide, repTarget, durationsFor, PLACES, EQUIP, MACHINES, DEFAULT_EQUIP, GOALS_LIBRE } from './libre.js';
+import { buildFreeSession, blockGuide, repTarget, durationsFor, PLACES, EQUIP, MACHINES, DEFAULT_EQUIP } from './libre.js';
 import { badges, newBadges, weekStreak } from './rewards.js';
 import { howto } from './coaching.js';
+import { buildTargeted, nextInZone, swapExercise, MUSCLES, CIBLE_EQUIP, CIBLE_DURATIONS, CIBLE_DEFAULT_EQUIP } from './cible.js';
 
 // ---------- État persistant ----------
 const KEY = 'forge.v1';
@@ -72,7 +73,7 @@ function route() {
   if (player && !(page === 'libre' && a === 'go')) pausePlayer();
   if (page === 'program') return renderProgram(a ? +a : currentWeek(state.profile));
   if (page === 'session') return renderSession(+a, +b);
-  if (page === 'libre') return a === 'go' ? renderPlayer() : renderLibre();
+  if (page === 'libre') return a === 'go' ? renderPlayer() : a === 'muscu' ? renderCibleSession() : renderLibre();
   if (page === 'progress') return renderProgress();
   if (page === 'profile') return renderProfile();
   return renderToday();
@@ -234,7 +235,7 @@ function renderToday() {
       <div><h3>☁ Sauvegarde ton programme</h3><div class="small muted">Crée ton compte pour ne jamais perdre tes séances.</div></div><span class="chev">›</span></a>` : ''}
     ${formeCard()}
     ${main}
-    <a class="card row between" href="#/libre"><div><h3>⚡ Séance libre</h3><div class="small muted">Plage, plein air, maison ou salle : une séance chronométrée selon ton matériel et ton temps.</div></div><span class="chev">›</span></a>
+    <a class="card row between" href="#/libre"><div><h3>⚡ Séance libre</h3><div class="small muted">Cardio, abdos, ou un muscle au choix : où tu veux, avec ce que tu as.</div></div><span class="chev">›</span></a>
     <h2>Ta journée</h2>
     ${m.measured ? `<p class="small muted">Calories ajustées sur ta dépense réelle : ${m.active} kcal d’énergie active par jour en moyenne (montre).</p>` : ''}
     <div class="grid2">
@@ -369,32 +370,7 @@ function renderSession(week, dayIndex) {
     return;
   }
 
-  $app.querySelectorAll('.set input').forEach((inp) => {
-    inp.addEventListener('input', () => {
-      const { slot, set, field } = inp.dataset;
-      data.exercises[slot].sets[set][field] = inp.value === '' ? '' : parseFloat(inp.value.replace(',', '.'));
-      save();
-    });
-  });
-  $app.querySelectorAll('.set .check').forEach((btn) => {
-    btn.onclick = () => {
-      const { slot, set } = btn.dataset;
-      const ex = s.exercises.find((x) => x.slot === +slot);
-      const st = data.exercises[slot].sets[set];
-      // Pas de valeur inventée : une série validée sans reps notées ferait croire au moteur
-      // que le haut de la fourchette est atteint, et la charge monterait à tort.
-      if (!st.done && !(st.r > 0)) {
-        const inp = btn.closest('.set').querySelector('[data-field=r]');
-        inp.classList.add('need'); inp.focus();
-        inp.addEventListener('input', () => inp.classList.remove('need'), { once: true });
-        return;
-      }
-      st.done = !st.done;
-      btn.closest('.set').classList.toggle('done', st.done);
-      save();
-      if (st.done) startTimer(ex.rest, ex.name);
-    };
-  });
+  bindSetControls(data, s.exercises);
   $app.querySelectorAll('[data-swap]').forEach((btn) => {
     btn.onclick = () => {
       const slot = +btn.dataset.swap;
@@ -429,6 +405,36 @@ function renderSession(week, dayIndex) {
   };
 }
 
+// Saisie des séries (charge, reps) et validation avec minuteur : programme et muscu ciblée.
+function bindSetControls(data, exList) {
+  $app.querySelectorAll('.set input').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const { slot, set, field } = inp.dataset;
+      data.exercises[slot].sets[set][field] = inp.value === '' ? '' : parseFloat(inp.value.replace(',', '.'));
+      save();
+    });
+  });
+  $app.querySelectorAll('.set .check').forEach((btn) => {
+    btn.onclick = () => {
+      const { slot, set } = btn.dataset;
+      const ex = exList.find((x) => x.slot === +slot);
+      const st = data.exercises[slot].sets[set];
+      // Pas de valeur inventée : une série validée sans reps notées ferait croire au moteur
+      // que le haut de la fourchette est atteint, et la charge monterait à tort.
+      if (!st.done && !(st.r > 0)) {
+        const inp = btn.closest('.set').querySelector('[data-field=r]');
+        inp.classList.add('need'); inp.focus();
+        inp.addEventListener('input', () => inp.classList.remove('need'), { once: true });
+        return;
+      }
+      st.done = !st.done;
+      btn.closest('.set').classList.toggle('done', st.done);
+      save();
+      if (st.done) startTimer(ex.rest, ex.name);
+    };
+  });
+}
+
 function exerciseCard(e, i, d, locked) {
   const range = e.repsMin === e.repsMax ? `${e.repsMin}` : `${e.repsMin}–${e.repsMax}`;
   const unit = e.timed ? 's' : 'reps';
@@ -436,7 +442,7 @@ function exerciseCard(e, i, d, locked) {
   return `<div class="card ex ${e.role === 'main' ? 'main' : ''}">
     <div class="ex-head">
       <div class="row" style="align-items:flex-start"><div class="ex-num">${i + 1}</div>
-        <div><h3>${esc(e.name)}</h3><div class="small muted">${ROLE[e.role]} · ${PATTERN_LABEL[e.pattern]}</div></div></div>
+        <div><h3>${esc(e.name)}</h3><div class="small muted">${e.subtitle ? esc(e.subtitle) : `${ROLE[e.role]} · ${PATTERN_LABEL[e.pattern]}`}</div></div></div>
       ${!locked && e.poolSize > 1 ? `<button class="btn ghost sm" data-swap="${e.slot}" title="Remplacer par un exercice équivalent">⇄ Variante</button>` : ''}
     </div>
     <div class="ex-meta">
@@ -472,6 +478,7 @@ function howtoBlock(id) {
 function mediaBlock(e) {
   const ph = photos(e.id);
   const video = `<a class="btn ghost sm" href="${videoUrl(e.name)}" target="_blank" rel="noopener">▶ Vidéo</a>`;
+  if (!ph && e.anim) return `<figure class="ex-media anim"><img src="media/anim/${e.anim}.svg" alt="${esc(e.name)}, mouvement animé" loading="lazy"><figcaption><span class="lbl">Mouvement</span>${video}</figcaption></figure>`;
   if (!ph) return `<div class="ex-media-actions">${video}</div>`;
   return `<figure class="ex-media" data-media>
       <img src="${ph.start}" alt="${esc(e.name)}, position de départ" loading="lazy" decoding="async">
@@ -584,29 +591,44 @@ function libreOpts() {
   const p = state.profile;
   const o = state.libre || {};
   const place = o.place || 'salle';
+  // Volets : cardio, abdos, muscu ciblée. Les anciens objectifs (renfo, mixte) retombent sur cardio.
+  const volet = ['cardio', 'abdos', 'cible'].includes(o.volet) ? o.volet : 'cardio';
+  const goal = volet === 'abdos' ? 'abdos' : 'cardio';
+  const allowed = durationsFor(goal);
   return {
-    goal: o.goal || 'mixte', place,
-    // Durée ramenée au maximum de l'objectif (ex. 90 min choisi en cardio, puis passage en renfo).
-    minutes: Math.min(o.minutes || 30, Math.max(...durationsFor(o.goal || 'mixte'))),
+    volet, goal, place,
+    // Durée ramenée dans les choix du volet (ex. 90 min en cardio, puis passage en abdos).
+    minutes: allowed.includes(o.minutes) ? o.minutes : Math.min(Math.max(...allowed), Math.max(allowed[0], o.minutes || 30)),
     equip: o.equip || [...DEFAULT_EQUIP[place]], seed: o.seed || 0,
     level: p.level, lowImpact: bodyMetrics(p).bmi >= 30,
   };
 }
+const VOLETS = { cardio: ['❤️ Cardio', 'Souffle, endurance'], abdos: ['🔥 Abdos', 'Sangle abdominale'], cible: ['💪 Muscu', 'Un muscle au choix'] };
+function voletChips(current) {
+  return `<div class="chips volets">${Object.entries(VOLETS).map(([k, [l, sub]]) => `<button type="button" class="chip ${current === k ? 'on' : ''}" data-volet="${k}">${l}<small>${sub}</small></button>`).join('')}</div>`;
+}
+function bindVolets(o) {
+  $app.querySelectorAll('[data-volet]').forEach((b) => b.addEventListener('click', () => {
+    state.libre = { ...(state.libre || {}), volet: b.dataset.volet, seed: 0 }; saveLocal(); renderLibre();
+  }));
+}
 function renderLibre() {
   const o = libreOpts();
+  if (o.volet === 'cible') return renderCibleSetup();
   const plan = buildFreeSession(o, o.seed);
   const machinesHere = o.place === 'salle' || o.place === 'maison';
   const chip = (group, val, on, label, sub) => `<button type="button" class="chip ${on ? 'on' : ''}" data-g="${group}" data-val="${val}">${label}${sub ? `<small>${sub}</small>` : ''}</button>`;
   const equipKeys = Object.keys(EQUIP).filter((k) => machinesHere || !MACHINES.includes(k));
   $app.innerHTML = `
     <div class="eyebrow">Hors programme</div><h1>Séance libre</h1>
+    ${cibleResume()}
+    ${voletChips(o.volet)}
     <p class="muted small">Une séance chronométrée, faite pour ce que tu as sous la main. Elle compte pour ta régularité et tes badges, sans toucher aux charges de ton programme.</p>
     <div class="card">
-      <label class="field"><span>Objectif</span><div class="chips">${Object.entries(GOALS_LIBRE).map(([k, [l, sub]]) => chip('goal', k, o.goal === k, l, sub)).join('')}</div></label>
       <label class="field"><span>Où ?</span><div class="chips">${Object.entries(PLACES).map(([k, [l, ic]]) => chip('place', k, o.place === k, `${ic} ${l}`)).join('')}</div></label>
       <label class="field"><span>Ton matériel</span><div class="chips">${equipKeys.map((k) => chip('equip', k, o.equip.includes(k), EQUIP[k])).join('')}</div>
         <small class="muted">${o.equip.length ? '' : 'Rien de coché : séance 100 % poids du corps.'}</small></label>
-      <label class="field"><span>Durée</span><div class="chips">${durationsFor(o.goal).map((m) => chip('minutes', m, o.minutes === m, m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? String(m % 60).padStart(2, '0') : ''}`)).join('')}</div>
+      <label class="field"><span>Durée</span><div class="chips">${durationsFor(o.goal).map((m) => chip('minutes', m, o.minutes === m, fmtMin(m))).join('')}</div>
         ${o.goal === 'cardio' && o.minutes >= 60 ? '<small class="muted">Séance longue : un bloc d’endurance à allure modérée, puis des intervalles.</small>' : ''}</label>
     </div>
     <div class="card hero">
@@ -624,7 +646,8 @@ function renderLibre() {
       <div class="row" style="margin-top:12px"><button class="btn ghost" id="reroll" style="flex:1">↻ Autre séance</button><button class="btn primary" id="go" style="flex:1">▶ Démarrer</button></div>
     </div>`;
 
-  const set = (patch) => { state.libre = { ...o, ...patch }; delete state.libre.level; delete state.libre.lowImpact; saveLocal(); renderLibre(); };
+  bindVolets(o);
+  const set = (patch) => { state.libre = { ...o, ...patch }; delete state.libre.level; delete state.libre.lowImpact; delete state.libre.goal; saveLocal(); renderLibre(); };
   $app.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => {
     const { g, val } = b.dataset;
     if (g === 'place') set({ place: val, equip: [...DEFAULT_EQUIP[val]], seed: 0 });
@@ -634,6 +657,130 @@ function renderLibre() {
   }));
   $app.querySelector('#reroll').onclick = () => set({ seed: o.seed + 1 });
   $app.querySelector('#go').onclick = () => { startPlayer(plan); location.hash = '#/libre/go'; };
+}
+
+// ---------- Muscu ciblée ----------
+function cibleOpts() {
+  const c = state.cible || {};
+  const place = c.place || 'salle';
+  return {
+    muscle: MUSCLES[c.muscle] ? c.muscle : 'pecs', place,
+    equip: c.equip || [...CIBLE_DEFAULT_EQUIP[place]],
+    minutes: CIBLE_DURATIONS.includes(c.minutes) ? c.minutes : 60, seed: c.seed || 0,
+  };
+}
+const fmtMin = (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${String(m % 60).padStart(2, '0')}` : ''}`);
+// Séance ciblée en cours : rappel en haut de l'onglet Libre.
+function cibleResume() {
+  const a = state.cible?.active;
+  return a ? `<a class="card row between" href="#/libre/muscu" style="border-color:var(--accent)"><div><h3>▶ Reprendre : ${esc(a.title)}</h3><div class="small muted">Séance ciblée en cours</div></div><span class="chev">›</span></a>` : '';
+}
+function renderCibleSetup() {
+  const p = state.profile;
+  const o = cibleOpts();
+  const plan = buildTargeted(p, o, state.history, o.seed);
+  const m = MUSCLES[o.muscle];
+  const chip = (group, val, on, label, sub) => `<button type="button" class="chip ${on ? 'on' : ''}" data-g="${group}" data-val="${val}">${label}${sub ? `<small>${sub}</small>` : ''}</button>`;
+  const empty = !plan.exercises.length;
+  $app.innerHTML = `
+    <div class="eyebrow">Hors programme</div><h1>Séance libre</h1>
+    ${cibleResume()}
+    ${voletChips('cible')}
+    <p class="muted small">Un seul muscle, travaillé zone par zone. Tu notes tes séries comme dans le programme, et les charges proposées tiennent compte de tes séances passées.</p>
+    <div class="card">
+      <label class="field"><span>Où ?</span><div class="chips">${Object.entries(PLACES).map(([k, [l, ic]]) => chip('place', k, o.place === k, `${ic} ${l}`)).join('')}</div></label>
+      ${o.place === 'salle' ? '' : `<label class="field"><span>Ton matériel</span><div class="chips">${Object.entries(CIBLE_EQUIP).map(([k, l]) => chip('equip', k, o.equip.includes(k), l)).join('')}</div></label>`}
+      <label class="field"><span>Quel muscle ?</span><div class="chips">${Object.entries(MUSCLES).map(([k, x]) => chip('muscle', k, o.muscle === k, `${x.icon} ${x.name}`)).join('')}</div></label>
+      <label class="field"><span>Durée</span><div class="chips">${CIBLE_DURATIONS.map((d) => chip('minutes', d, o.minutes === d, fmtMin(d))).join('')}</div></label>
+    </div>
+    <div class="card hero">
+      <div class="row between"><div class="eyebrow">Ta séance</div>${empty ? '' : `<span class="pill">≈ ${plan.minutes} min · ${plan.sets} séries</span>`}</div>
+      <h2 style="margin:6px 0 10px">${m.icon} ${esc(m.name)}</h2>
+      ${plan.capped ? `<p class="small guide">⏱ ${plan.minutes} min au lieu de ${fmtMin(o.minutes)} : au-delà d’environ ${m.cap} séries, travailler encore ${esc(m.the)} dans la même séance n’apporte presque plus rien et retarde la récupération. Ajoute un autre muscle ou du cardio si tu as le temps.</p>` : ''}
+      ${empty ? `<p class="guide">Sans matériel, on ne peut pas travailler correctement ce muscle. Coche au moins : ${esc([...new Set(plan.zones.flatMap((z) => z.missing || []))].join(', '))}.</p>` : ''}
+      <div class="tip small"><div>Échauffement · 5 min <div class="muted">Cardio léger, puis 2 séries légères sur le premier exercice.</div></div></div>
+      ${plan.zones.map((z, zi) => `<div class="tip small"><div><b>${zi + 1}. ${esc(z.zone.name)}</b>
+        <p class="guide">${esc(z.zone.desc)}</p>
+        ${z.exercises.length ? `<div class="freeex-list">${z.exercises.map((e) => ciblePreview(e)).join('')}</div>`
+          : `<p class="muted" style="margin:4px 0 0">Pas d’exercice possible ici avec ton matériel${z.missing && z.missing.length ? ` (il faudrait : ${esc(z.missing.join(' ou '))})` : ''}.</p>`}</div></div>`).join('')}
+      <div class="row" style="margin-top:12px"><button class="btn ghost" id="reroll" style="flex:1">↻ Autre séance</button><button class="btn primary" id="go" style="flex:1" ${empty ? 'disabled' : ''}>▶ Démarrer</button></div>
+    </div>`;
+  bindVolets(o);
+  const set = (patch) => { state.cible = { ...(state.cible || {}), ...o, ...patch }; saveLocal(); renderLibre(); };
+  $app.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => {
+    const { g, val } = b.dataset;
+    if (g === 'place') set({ place: val, equip: [...CIBLE_DEFAULT_EQUIP[val]], seed: 0 });
+    else if (g === 'equip') set({ equip: o.equip.includes(val) ? o.equip.filter((x) => x !== val) : [...o.equip, val], seed: 0 });
+    else if (g === 'minutes') set({ minutes: +val, seed: 0 });
+    else set({ [g]: val, seed: 0 });
+  }));
+  $app.querySelector('#reroll').onclick = () => set({ seed: o.seed + 1 });
+  $app.querySelector('#go').onclick = () => {
+    if (state.cible?.active && !confirm('Une séance ciblée est déjà en cours. La remplacer ?')) return;
+    const session = buildTargeted(p, o, state.history, o.seed);
+    const draft = { exercises: Object.fromEntries(session.exercises.map((e) => [e.slot, { id: e.id, sets: Array.from({ length: e.sets }, () => ({ w: e.load ?? '', r: '', done: false })) }])) };
+    state.cible = { ...state.cible, ...o, active: session, draft, opts: o };
+    saveLocal();
+    location.hash = '#/libre/muscu';
+  };
+}
+// Fiche dépliable d'un exercice ciblé : séries × reps, charge, photos, repères.
+function ciblePreview(e) {
+  const range = e.repsMin === e.repsMax ? `${e.repsMin}` : `${e.repsMin}–${e.repsMax}`;
+  return `<details class="freeex"><summary><span>${esc(e.name)}</span><span class="muted small dose">${e.sets} × ${range}${e.load ? ` · ${kg(e.load)}` : ''}</span></summary>
+    ${mediaBlock(e)}<div class="ex-cue">${esc(e.cue)}${howtoBlock(e.id)}</div></details>`;
+}
+function renderCibleSession() {
+  const c = state.cible;
+  if (!c || !c.active) { location.hash = '#/libre'; return; }
+  const p = state.profile;
+  const s = c.active;
+  const data = c.draft;
+  $tab.hidden = false;
+  let n = 0;
+  $app.innerHTML = `
+    <a class="small muted" href="#/libre">‹ Séance libre</a>
+    <div class="eyebrow" style="margin-top:10px">Muscu ciblée · ${esc(PLACES[s.place][0])}</div>
+    <h1>${esc(MUSCLES[s.muscle].icon)} ${esc(MUSCLES[s.muscle].name)}</h1>
+    <div class="row wrap" style="margin:8px 0 14px"><span class="pill">≈ ${s.minutes} min</span><span class="pill">${s.exercises.length} exercices · ${s.sets} séries</span></div>
+    <div class="card"><h3>Échauffement · 5 min</h3><p class="small muted" style="margin:6px 0 0">5 min de cardio léger, quelques mouvements articulaires, puis 2 séries légères (environ 50 % puis 70 % de la charge) sur le premier exercice.</p></div>
+    ${s.zones.filter((z) => z.exercises.length).map((z) => `<div class="zone-head"><h2>${esc(z.zone.name)}</h2><p class="small muted">${esc(z.zone.desc)}</p></div>
+      ${z.exercises.map((e) => exerciseCard({ ...s.exercises.find((x) => x.slot === e.slot) }, n++, data.exercises[e.slot], false)).join('')}`).join('')}
+    <div class="card"><h3>Retour au calme · 5 min</h3><p class="small muted" style="margin:6px 0 0">Étire le muscle travaillé, respire lentement. Bois de l’eau et prends un repas avec ${Math.round(p.weight * 0.4)} g de protéines dans les 2 h.</p></div>
+    <button class="btn ghost block" id="abandon" style="margin-bottom:10px">Abandonner la séance</button>
+    <div class="sticky-actions"><button class="btn primary block" id="finish">Terminer la séance</button></div>`;
+  bindSetControls(data, s.exercises);
+  $app.querySelectorAll('[data-swap]').forEach((btn) => {
+    btn.onclick = () => {
+      const slot = +btn.dataset.swap;
+      const next = nextInZone(s, slot, c.opts || cibleOpts(), p);
+      if (!next) return;
+      swapExercise(s, slot, next, p, state.history);
+      const e = s.exercises.find((x) => x.slot === slot);
+      for (const z of s.zones) { const i = z.exercises.findIndex((x) => x.slot === slot); if (i >= 0) z.exercises[i] = e; }
+      data.exercises[slot] = { id: e.id, sets: Array.from({ length: e.sets }, () => ({ w: e.load ?? '', r: '', done: false })) };
+      saveLocal(); renderCibleSession();
+    };
+  });
+  $app.querySelector('#abandon').onclick = () => {
+    if (!confirm('Abandonner cette séance ? Rien ne sera enregistré.')) return;
+    stopTimer(); state.cible.active = null; state.cible.draft = null; saveLocal(); location.hash = '#/libre';
+  };
+  $app.querySelector('#finish').onclick = () => {
+    const exercises = s.exercises.map((e) => ({
+      slot: e.slot, id: e.id, name: e.name,
+      sets: data.exercises[e.slot].sets.map((x) => ({ w: +x.w || 0, r: +x.r || 0, done: !!x.done })),
+    }));
+    const doneSets = exercises.reduce((k, e) => k + e.sets.filter((x) => x.done).length, 0);
+    if (!doneSets && !confirm('Aucune série cochée. Enregistrer quand même ?')) return;
+    const before = [...state.history];
+    state.history.push({ type: 'cible', muscle: s.muscle, place: s.place, name: `${MUSCLES[s.muscle].name} (ciblée)`, minutes: s.minutes, date: new Date().toISOString(), exercises });
+    state.cible.active = null; state.cible.draft = null;
+    state.cible.seed = (state.cible.seed || 0) + 1;
+    stopTimer(); save();
+    location.hash = '#/progress';
+    celebrate(newBadges(before, state.history, p));
+  };
 }
 
 // Vidéo d'un exercice de séance libre (les machines cardio : vidéo de fractionné).
@@ -863,6 +1010,7 @@ function renderProgress() {
     ${state.history.slice().reverse().slice(0, 12).map((h) => {
       const day = new Date(h.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
       if (h.type === 'libre') return `<div class="card row between"><div><h3>⚡ ${esc(h.name)}</h3><div class="small muted">${day} · séance libre · ${h.minutes} min</div></div></div>`;
+      if (h.type === 'cible') return `<div class="card row between"><div><h3>🎯 ${esc(h.name)}</h3><div class="small muted">${day} · muscu ciblée · ${h.exercises.reduce((k, e) => k + e.sets.filter((x) => x.done).length, 0)} séries</div></div></div>`;
       return `<a class="card row between" href="#/session/${h.week}/${h.dayIndex}">
       <div><h3>${esc(h.name)}</h3><div class="small muted">${day} · semaine ${h.week} · ${h.exercises.reduce((n, e) => n + e.sets.filter((s) => s.done).length, 0)} séries</div></div><span class="chev">›</span></a>`;
     }).join('') || '<p class="muted small">Aucune séance enregistrée pour l’instant.</p>'}`;

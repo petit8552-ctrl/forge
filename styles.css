@@ -181,3 +181,8 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .freeex summary .dose { margin-left: auto; margin-right: 8px; font-weight: 400; }
 .ex-media.anim img { object-fit: contain; background: #1a1d23; }
 .player .target { display: inline-block; margin: 0 0 8px; padding: 4px 12px; border-radius: 999px; background: rgba(198, 244, 50, .12); color: var(--accent); font-size: 14px; }
+.zone-head { margin: 18px 2px 8px; }
+.zone-head h2 { margin: 0 0 2px; font-size: 18px; color: var(--accent); }
+.zone-head p { margin: 0; }
+.chips.volets { margin: 6px 0 12px; }
+.chips.volets .chip { flex: 1; }
