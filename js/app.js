@@ -1339,4 +1339,27 @@ Sync.init({
     route();
   },
 });
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+// Mises à jour : une nouvelle version prend la main dès qu'elle est installée (skipWaiting + claim).
+// On recharge alors la page pour exécuter le nouveau code, sauf pendant une séance chronométrée :
+// dans ce cas, un bandeau propose de recharger à la fin.
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return; // première installation : rien à recharger
+    if (player) { showUpdateBanner(); return; }
+    reloading = true; location.reload();
+  });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+    // Vérifie s'il y a une nouvelle version à chaque retour dans l'appli (l'appli installée reste souvent ouverte).
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  }).catch(() => {});
+}
+function showUpdateBanner() {
+  if (document.getElementById('update-banner')) return;
+  const el = document.createElement('div');
+  el.id = 'update-banner'; el.className = 'toast';
+  el.innerHTML = 'Nouvelle version de Forge disponible. <button class="btn sm primary" style="margin-left:8px">Recharger</button>';
+  el.querySelector('button').onclick = () => location.reload();
+  document.body.appendChild(el);
+}
