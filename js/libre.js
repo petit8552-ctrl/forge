@@ -116,16 +116,17 @@ export const MACHINE_CARDIO = {
 };
 
 const WARMUP = [
-  { name: 'Montées de genoux', cue: 'Doucement, pour monter le cardio.' },
-  { name: 'Rotations des bras', cue: 'Grands cercles, avant puis arrière.' },
-  { name: 'Squats lents', cue: 'Amplitude complète, sans forcer.' },
-  { name: 'Fentes avec rotation', cue: 'Tourne le buste vers la jambe avant.' },
-  { name: 'Inchworm', cue: 'Mains au sol, avance, reviens.' },
+  { name: 'Montées de genoux', cue: 'Doucement, pour monter le cardio.', anim: 'l-genoux-hauts' },
+  { name: 'Rotations des bras', cue: 'Grands cercles, avant puis arrière.', photo: 'Arm_Circles' },
+  { name: 'Squats lents', cue: 'Amplitude complète, sans forcer.', photo: 'Bodyweight_Squat' },
+  { name: 'Fentes avec rotation', cue: 'Grande fente, main au sol, tourne le buste et ouvre le bras vers le plafond.', photo: 'Worlds_Greatest_Stretch' },
+  { name: 'Inchworm', cue: 'Mains au sol, avance, reviens.', photo: 'Inchworm' },
 ];
+// Les photos et animations servent d'illustration ; ces étapes ne sont pas enregistrées comme exercices.
 const COOLDOWN = [
-  { name: 'Étirement cuisses et fessiers', cue: 'Respire lentement, 30 s par côté.' },
-  { name: 'Étirement épaules et pectoraux', cue: 'Bras derrière le dos ou contre un mur.' },
-  { name: 'Respiration au sol', cue: 'Allongé, inspire 4 s, expire 6 s.' },
+  { name: 'Étirement cuisses et fessiers', cue: 'Fente basse genou au sol, bassin vers l’avant. Respire lentement, 30 s par côté.', photo: 'Kneeling_Hip_Flexor' },
+  { name: 'Étirement épaules et pectoraux', cue: 'Bras tendus, ouvre grand vers l’arrière puis croise devant, lentement.', photo: 'Dynamic_Chest_Stretch' },
+  { name: 'Respiration au sol', cue: 'Allongé, inspire 4 s, expire 6 s.', anim: 'respiration' },
 ];
 
 // Temps d'effort / de récupération selon le niveau.
@@ -319,7 +320,7 @@ export function blockGuide(b) {
 export function toSteps(blocks, warmSteps = 5, coolSteps = 3) {
   const steps = [];
   const warm = WARMUP.slice(0, warmSteps); const cool = COOLDOWN.slice(0, coolSteps);
-  warm.forEach((w, i) => steps.push({ phase: 'warmup', kind: 'work', label: w.name, cue: w.cue, secs: 60, block: 'Échauffement', pos: `${i + 1}/${warm.length}` }));
+  warm.forEach((w, i) => steps.push({ phase: 'warmup', kind: 'work', label: w.name, cue: w.cue, photo: w.photo || null, anim: w.anim || null, secs: 60, block: 'Échauffement', pos: `${i + 1}/${warm.length}` }));
   blocks.forEach((b, bi) => {
     steps.push({ phase: 'main', kind: 'rest', label: bi === 0 ? 'Prépare-toi' : 'Récupération', cue: `Ensuite : ${b.name}`, secs: bi === 0 ? 15 : BETWEEN, block: b.name });
     for (let r = 0; r < b.rounds; r++) {
@@ -341,6 +342,6 @@ export function toSteps(blocks, warmSteps = 5, coolSteps = 3) {
       }
     }
   });
-  cool.forEach((c, i) => steps.push({ phase: 'cooldown', kind: 'work', label: c.name, cue: c.cue, secs: 60, block: 'Retour au calme', pos: `${i + 1}/${cool.length}` }));
+  cool.forEach((c, i) => steps.push({ phase: 'cooldown', kind: 'work', label: c.name, cue: c.cue, photo: c.photo || null, anim: c.anim || null, secs: 60, block: 'Retour au calme', pos: `${i + 1}/${cool.length}` }));
   return steps;
 }

@@ -151,6 +151,7 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .player.rest .cheer { color: var(--blue); }
 @media (prefers-reduced-motion: reduce) { .player .pclock.final { animation: none; } }
 .player .ex-media { margin-top: 8px; }
+.player .ex-media.upnext { outline: 2px solid var(--blue); outline-offset: -2px; opacity: .92; }
 
 /* Récompenses */
 .badges { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }

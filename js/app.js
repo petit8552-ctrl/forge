@@ -555,12 +555,35 @@ let timerEnd = 0;
 const SOUND_KEY = 'forge.sound';
 const soundOn = () => { try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; } };
 let audioCtx = null;
+let loudSession = false;
+// iPhone d'avant iOS 17 : le son du navigateur suit le bouton silencieux. Lire un petit fichier audio
+// muet (élément <audio>) pendant un toucher fait passer la page en mode « lecture », qui l'ignore.
+let silentEl = null;
+function unmuteIOS(on) {
+  loudSession = on;
+  if (navigator.audioSession) navigator.audioSession.type = on ? 'playback' : 'transient';
+  try {
+    if (!on) { if (silentEl) silentEl.pause(); return; }
+    if (!silentEl) {
+      const n = 4410; const buf = new ArrayBuffer(44 + n * 2); const v = new DataView(buf);
+      const w = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+      w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true);
+      v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 44100, true); v.setUint32(28, 88200, true);
+      v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+      silentEl = document.createElement('audio');
+      silentEl.src = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+      silentEl.loop = true; silentEl.setAttribute('playsinline', ''); silentEl.preload = 'auto';
+    }
+    const pr = silentEl.play(); if (pr && pr.catch) pr.catch(() => {});
+  } catch { /* pas grave : le son marchera hors mode silencieux */ }
+}
 let audioCheck = null; // { wall, t } : pour repérer une horloge audio figée (bug iOS)
 let scheduled = [];
 function audio() {
   try {
     // « transient » : son court qui baisse la musique en cours au lieu de la couper (Safari récent).
-    if (navigator.audioSession) navigator.audioSession.type = 'transient';
+    // Séance libre avec musique : « playback », qui joue même quand l'iPhone est en mode silencieux.
+    if (navigator.audioSession) navigator.audioSession.type = loudSession ? 'playback' : 'transient';
     const AC = window.AudioContext || window.webkitAudioContext;
     // iPhone : après un verrouillage ou un changement d'appli, le son passe en « interrupted »,
     // ou reste « running » avec une horloge figée. On recrée alors un contexte neuf : appelé
@@ -725,6 +748,8 @@ function renderLibre() {
       <p class="small muted" style="margin:8px 0 0">Pas besoin de chrono : une fois démarrée, l’appli te dit quoi faire et bipe à chaque changement. Touche un exercice pour voir le mouvement.</p>
       <div class="tip small"><div>Retour au calme · ${plan.steps.filter((x) => x.phase === 'cooldown').length} min</div></div>
       <div class="row" style="margin-top:12px"><button class="btn ghost" id="reroll" style="flex:1">↻ Autre séance</button><button class="btn primary" id="go" style="flex:1">▶ Démarrer</button></div>
+      <button class="btn ghost block" id="soundtest" style="margin-top:8px">🔊 Tester le son</button>
+      <p class="small muted" id="soundhint" style="margin:6px 0 0">Musique, voix du coach et bips pendant la séance. Rien entendu ? Monte le volume du téléphone.</p>
     </div>`;
 
   bindVolets(o);
@@ -738,6 +763,7 @@ function renderLibre() {
   }));
   $app.querySelector('#reroll').onclick = () => set({ seed: o.seed + 1 });
   $app.querySelector('#go').onclick = () => { startPlayer(plan); location.hash = '#/libre/go'; };
+  $app.querySelector('#soundtest').onclick = soundTest;
 }
 
 // ---------- Muscu ciblée ----------
@@ -923,16 +949,24 @@ function freeExercisePreview(e, num, b) {
     ${media}<div class="ex-cue">${esc(e.cue || '')}${howtoBlock(e.id)}</div></details>`;
 }
 
-// Photo départ / arrivée + bouton vidéo, comme en séance muscu. Ouvrir la vidéo met la séance en pause.
-function freeMedia(st, ph) {
-  if (st.kind !== 'work' || !st.exId) return '';
-  const name = st.label.replace(/ : effort$/, '');
-  const video = `<a class="btn ghost sm" data-pvideo href="${freeVideo(st.exId, name)}" target="_blank" rel="noopener">▶ Vidéo</a>`;
-  if (st.anim) return `<figure class="ex-media anim"><img src="media/anim/${st.anim}.svg" alt="${esc(name)}, mouvement animé"><figcaption><span class="lbl">Mouvement</span>${video}</figcaption></figure>`;
-  if (!ph) return `<div class="ex-media-actions" style="text-align:center">${video}</div>`;
-  return `<figure class="ex-media" data-media>
-      <img src="${ph.start}" alt="${esc(name)}, départ"><img src="${ph.end}" alt="${esc(name)}, arrivée" class="end">
-      <figcaption><span class="lbl">Départ ⇄ arrivée</span>${video}</figcaption></figure>`;
+// Photo départ / arrivée (ou silhouette animée) + bouton vidéo, comme en séance muscu.
+// Pendant une récupération, on montre l'exercice qui arrive pour s'y préparer.
+// Ouvrir la vidéo met la séance en pause.
+function freeMedia(st, next) {
+  let show = st; let lbl = 'Départ ⇄ arrivée';
+  if (st.kind !== 'work') {
+    if (!next || next.kind !== 'work') return '';
+    show = next; lbl = `À suivre : ${next.label.replace(/ : (effort|endurance)$/, '')}`;
+  }
+  if (!show.photo && !show.anim && !show.exId) return '';
+  const name = show.label.replace(/ : (effort|endurance)$/, '');
+  const video = `<a class="btn ghost sm" data-pvideo href="${freeVideo(show.exId, name)}" target="_blank" rel="noopener">▶ Vidéo</a>`;
+  const cls = st.kind !== 'work' ? ' upnext' : '';
+  if (show.anim && !show.photo) return `<figure class="ex-media anim${cls}"><img src="media/anim/${show.anim}.svg" alt="${esc(name)}, mouvement animé"><figcaption><span class="lbl">${esc(st.kind !== 'work' ? lbl : 'Mouvement')}</span>${video}</figcaption></figure>`;
+  if (!show.photo) return `<div class="ex-media-actions" style="text-align:center">${video}</div>`;
+  return `<figure class="ex-media${cls}" data-media>
+      <img src="media/${show.photo}_0.jpg" alt="${esc(name)}, départ"><img src="media/${show.photo}_1.jpg" alt="${esc(name)}, arrivée" class="end">
+      <figcaption><span class="lbl">${esc(lbl)}</span>${video}</figcaption></figure>`;
 }
 
 // Lecteur : enchaîne les étapes (effort / récup) avec décompte, bips, musique et voix du coach.
@@ -954,6 +988,18 @@ function startPlayer(plan) {
 function syncMusic() {
   if (!player || player.paused || !prefOn(MUSIC_KEY)) { Coach.musicStop(); return; }
   Coach.musicStart(audio(), musicMode(player.plan.steps[player.idx], player.left));
+}
+// Bouton « Tester le son » : même déblocage que pendant la séance, puis bips, musique et voix.
+function soundTest() {
+  unmuteIOS(true);
+  const ctx = audio();
+  if (ctx) [0, 0.15, 0.3].forEach((d, i) => beep(ctx, ctx.currentTime + d, [660, 880, 1040][i], 0.15));
+  Coach.primeVoice();
+  Coach.musicStart(ctx, 'work');
+  Coach.say('Le son fonctionne. Bonne séance !', true);
+  setTimeout(() => { if (!player) { Coach.musicStop(); unmuteIOS(false); } }, 4000);
+  const hint = $app.querySelector('#soundhint');
+  if (hint) hint.innerHTML = 'Tu dois entendre trois bips, la musique et la voix. Rien ? Monte le volume (boutons sur le côté) et vérifie que le son n’est pas coupé dans le centre de contrôle.';
 }
 // Le coach parle (si la voix est activée) et la phrase s'affiche sous le chrono.
 function coachSay(text, urgent) {
@@ -988,6 +1034,7 @@ function resumePlayer() {
   if (!player) return;
   const first = !player.started;
   player.paused = false; player.started = true; player.lastTick = Date.now();
+  unmuteIOS(true); // avant audio() : le son passe même en mode silencieux
   scheduleSteps(); keepAwake(true);
   Coach.primeVoice(); syncMusic(); // appelé pendant le toucher : débloque son et voix sur iPhone
   if (first) introduceStep();
@@ -998,7 +1045,7 @@ function pausePlayer() {
   if (!player || player.paused) return;
   tickPlayer();
   player.paused = true; clearInterval(playerTick); playerTick = null;
-  cancelSound(); keepAwake(false); Coach.musicStop(); Coach.hush();
+  cancelSound(); keepAwake(false); Coach.musicStop(); Coach.hush(); unmuteIOS(false);
   if (location.hash.startsWith('#/libre/go')) paintPlayer(true);
 }
 function tickPlayer() {
@@ -1034,7 +1081,7 @@ function skipStep() {
 }
 function finishPlayer(completed) {
   clearInterval(playerTick); playerTick = null; cancelSound(); keepAwake(false);
-  Coach.musicStop(); Coach.hush();
+  Coach.musicStop(); Coach.hush(); unmuteIOS(false);
   if (completed && prefOn(VOICE_KEY)) Coach.say('Séance terminée, bravo ! Tu peux être fier de toi.');
   const pl = player; player = null;
   const minutes = Math.round(pl.elapsed / 60);
@@ -1083,7 +1130,6 @@ function paintPlayer(full) {
     $app.querySelector('#pbar').style.width = `${Math.min(100, (doneSecs / total) * 100)}%`;
     return;
   }
-  const ph = st.photo ? { start: `media/${st.photo}_0.jpg`, end: `media/${st.photo}_1.jpg` } : null;
   $app.innerHTML = `
     <div class="row between"><div class="eyebrow">${esc(st.block)}${st.pos ? ` · ${esc(st.pos)}` : ''}</div>
       <div class="row" style="gap:6px">
@@ -1100,7 +1146,7 @@ function paintPlayer(full) {
         ? `<div class="target">${(() => { const t = repTarget(st.exId, st.secs, state.profile.level); return t.reps ? `Objectif : <b>${esc(t.text)}</b>` : `<b>${esc(t.text[0].toUpperCase() + t.text.slice(1))}</b>`; })()}</div>` : ''}
       <p class="muted small" style="margin:0 0 12px">${esc(st.cue || '')}</p>
       ${st.kind === 'work' && st.exId ? `<div class="small muted" style="text-align:left;margin:0 auto 12px;max-width:420px">${howtoBlock(st.exId)}</div>` : ''}
-      ${freeMedia(st, ph)}
+      ${freeMedia(st, next)}
     </div>
     <div class="card small" style="margin-top:14px">${next ? `Ensuite : <b>${esc(next.label)}</b> · ${next.secs} s` : 'Dernière étape 🔥'}</div>
     <div class="sticky-actions row">
