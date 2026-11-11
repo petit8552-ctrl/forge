@@ -598,15 +598,9 @@ function beep(ctx, at, freq, dur) {
   osc.start(at); osc.stop(at + dur + 0.05);
   scheduled.push(osc);
 }
-function scheduleEndSound(seconds) {
-  cancelSound();
-  if (!soundOn()) return;
-  const ctx = audio(); if (!ctx) return;
-  const end = ctx.currentTime + seconds;
-  // 3 tops courts avant la fin, puis 3 bips aigus : « c'est reparti ».
-  for (const s of [3, 2, 1]) if (seconds > s) beep(ctx, end - s, 660, 0.12);
-  for (const s of [0, 0.25, 0.5]) beep(ctx, end + s, 1040, 0.2);
-}
+// Ancienne programmation Web Audio, muette sur certains iPhone : la fin de repos passe désormais par un
+// vrai fichier audio (Coach.fx), lancé depuis le minuteur. Gardé pour les appels existants.
+function scheduleEndSound() { cancelSound(); }
 function cancelSound() {
   for (const o of scheduled) { try { o.stop(0); o.disconnect(); } catch { /* déjà terminé */ } }
   scheduled = [];
@@ -628,7 +622,10 @@ function startTimer(seconds, label) {
   const end = Date.now() + seconds * 1000;
   timerEnd = end;
   $timer.hidden = false;
-  scheduleEndSound(seconds);
+  // Valider une série = un toucher : on débloque le lecteur audio. « transient » : le son baisse ta propre
+  // musique un instant au lieu de la couper.
+  if (!player) { Coach.unlockAudio('transient'); Coach.primeVoice(); Coach.prepareSounds().catch(() => {}); }
+  let counted = false; // le 3-2-1 + cloche est-il parti ? Sinon (repos très court, minuteur ralenti) : cloche à 0
   keepAwake(true);
   const paint = () => {
     const m = Math.floor(left / 60); const sec = String(left % 60).padStart(2, '0');
@@ -639,14 +636,19 @@ function startTimer(seconds, label) {
     $timer.querySelector('#tskip').onclick = stopTimer;
     $timer.querySelector('#tsound').onclick = () => {
       try { localStorage.setItem(SOUND_KEY, soundOn() ? 'off' : 'on'); } catch { /* rien */ }
-      scheduleEndSound(left); paint();
+      if (!soundOn()) Coach.fxStop();
+      paint();
     };
   };
   paint();
   timerId = setInterval(() => {
     left = Math.max(0, Math.round((end - Date.now()) / 1000));
+    // 3 tops puis cloche : lancé à 3 s de la fin, le fichier tombe pile à 0.
+    if (!counted && left <= 3 && left > 0 && seconds > 3) { counted = true; if (soundOn()) Coach.fx('restEnd'); }
     if (left <= 0) {
       clearInterval(timerId); timerId = null;
+      if (soundOn() && !counted) Coach.fx('bell');
+      if (prefOn(VOICE_KEY)) Coach.say('C’est reparti, série suivante !', true);
       if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
       // Le bandeau reste 2 s en « C'est reparti » pour ceux qui ont coupé le son.
       $timer.innerHTML = '<div class="t">0:00</div><div class="grow"><b>C’est reparti 💪</b><div class="small muted">Série suivante</div></div>';
@@ -658,8 +660,10 @@ function startTimer(seconds, label) {
   }, 1000);
 }
 function stopTimer() {
+  const running = !!timerId;
   clearInterval(timerId); timerId = null; timerEnd = 0; $timer.hidden = true; $timer.classList.remove('go');
   cancelSound(); keepAwake(false);
+  if (running && !player) Coach.fxStop(); // « Passer » ou « +30 s » : on coupe le décompte en cours
 }
 
 // ---------- Séance libre ----------
@@ -953,7 +957,7 @@ function freeMedia(st, next) {
 let player = null; // { plan, idx, endAt, left, paused, elapsed, lastTick, done, cheer, marks }
 let playerTick = null;
 const MUSIC_KEY = 'forge.music';
-const APP_VERSION = 'v21'; // même numéro que CACHE dans sw.js
+const APP_VERSION = 'v22'; // même numéro que CACHE dans sw.js
 const VOICE_KEY = 'forge.voice';
 const prefOn = (k) => { try { return localStorage.getItem(k) !== 'off'; } catch { return true; } };
 const togglePref = (k) => { try { localStorage.setItem(k, prefOn(k) ? 'off' : 'on'); } catch { /* rien */ } };

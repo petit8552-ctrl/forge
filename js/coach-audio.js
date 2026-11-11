@@ -7,11 +7,14 @@
 // d'auteur, marche hors ligne), puis on les lit avec deux lecteurs <audio> débloqués par un toucher.
 
 const RATE = 22050;
-const BPM = 124;
+// Style « Tabata » : électro rapide à 160 BPM, grosse caisse à chaque temps, basse qui pompe entre
+// les temps, accords plaqués ; plus calme en récupération ; montée de caisse claire et souffle dans
+// les 10 dernières secondes d'effort. Sifflet d'arbitre pour partir, cloche de boxe pour s'arrêter.
+const BPM = 160;
 const SIXTEENTH = 60 / BPM / 4;
-const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // la mineur, fa, do, sol
-const BASS = [45, 41, 36, 43];
-const CUTOFF = { rest: 900, work: 5000, final: 10000 };
+const CHORDS = [[57, 60, 64], [57, 60, 64], [53, 57, 60], [55, 59, 62]]; // la mineur ×2, fa, sol
+const BASS = [45, 45, 41, 43];
+const CUTOFF = { rest: 1100, work: 7000, final: 10000 };
 const hz = (m) => 440 * 2 ** ((m - 69) / 12);
 
 // ---------- Fabrication des fichiers ----------
@@ -25,14 +28,25 @@ function toWav(buf) {
   for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, d[i])) * 0x7fff, true);
   return URL.createObjectURL(new Blob([ab], { type: 'audio/wav' }));
 }
-function render(secs, draw) {
+// Mise à niveau : les bips sont ramenés à une crête de 0,95 ; la musique est montée jusqu'au volume
+// moyen visé (`loud`), les crêtes étant arrondies en douceur (saturation légère, sans craquement).
+function level(buf, loud) {
+  const d = buf.getChannelData(0); let peak = 0; let sum = 0;
+  for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; sum += d[i] * d[i]; }
+  if (!peak) return buf;
+  if (!loud) { const g = 0.95 / peak; for (let i = 0; i < d.length; i++) d[i] *= g; return buf; }
+  const g = loud / Math.sqrt(sum / d.length);
+  for (let i = 0; i < d.length; i++) d[i] = Math.tanh(d[i] * g);
+  return buf;
+}
+function render(secs, draw, loud = 0) {
   const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   const c = new OC(1, Math.ceil(RATE * secs), RATE);
   draw(c, out(c));
   return new Promise((res, rej) => {
     c.oncomplete = (e) => res(e.renderedBuffer); // anciens Safari : pas de promesse
     const p = c.startRendering(); if (p && p.then) p.then(res, rej);
-  }).then(toWav);
+  }).then((b) => toWav(level(b, loud)));
 }
 // Sortie commune : compresseur pour éviter la saturation quand tout joue ensemble.
 function out(c) {
@@ -53,50 +67,111 @@ function tone(c, dest, type, freq, t, dur, peak, attack) {
   o.connect(g).connect(dest); o.start(t); o.stop(t + dur + 0.05);
 }
 
+function noiseBuf(c) {
+  const b = c.createBuffer(1, RATE, RATE); const d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
+function hissAt(c, dest, noise, t, dur, peak, type, freq, attack = 0.002) {
+  const s = c.createBufferSource(); const f = c.createBiquadFilter(); const g = c.createGain();
+  s.buffer = noise; f.type = type; f.frequency.value = freq; env(g, t, peak, dur, attack);
+  s.connect(f).connect(g).connect(dest); s.start(t); s.stop(t + dur + 0.02);
+}
+// Accord « supersaw » : 3 dents de scie légèrement désaccordées par note.
+function stab(c, dest, notes, t, dur, peak) {
+  for (const m of notes) for (const det of [-12, 0, 12]) {
+    const o = c.createOscillator(); const g = c.createGain();
+    o.type = 'sawtooth'; o.frequency.value = hz(m); o.detune.value = det; env(g, t, peak, dur, 0.004);
+    o.connect(g).connect(dest); o.start(t); o.stop(t + dur + 0.05);
+  }
+}
+
 function drawLoop(c, dest, mode) {
   const filter = c.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = CUTOFF[mode];
-  const mix = c.createGain(); mix.gain.value = 0.55; filter.connect(mix).connect(dest);
-  const noise = c.createBuffer(1, RATE / 2, RATE); const nd = noise.getChannelData(0);
-  for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
-  const hiss = (t, dur, peak, type, freq) => {
-    const s = c.createBufferSource(); const f = c.createBiquadFilter(); const g = c.createGain();
-    s.buffer = noise; f.type = type; f.frequency.value = freq; env(g, t, peak, dur, 0.002);
-    s.connect(f).connect(g).connect(filter); s.start(t); s.stop(t + dur + 0.02);
-  };
-  const kick = (t) => {
+  const mix = c.createGain(); mix.gain.value = 0.5; filter.connect(mix).connect(dest);
+  const noise = noiseBuf(c);
+  const calm = mode === 'rest'; const final = mode === 'final';
+  const kick = (t, peak) => {
     const o = c.createOscillator(); const g = c.createGain();
-    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
-    env(g, t, 0.8, 0.28, 0.002); o.connect(g).connect(mix); o.start(t); o.stop(t + 0.3);
+    o.frequency.setValueAtTime(170, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.1);
+    env(g, t, peak, 0.26, 0.001); o.connect(g).connect(mix); o.start(t); o.stop(t + 0.3);
+    hissAt(c, mix, noise, t, 0.012, peak * 0.4, 'highpass', 3000); // attaque sèche
   };
-  const calm = mode === 'rest';
+  const snare = (t, peak) => {
+    hissAt(c, filter, noise, t, 0.18, peak, 'bandpass', 2200);
+    tone(c, filter, 'triangle', 190, t, 0.09, peak * 0.6, 0.001);
+  };
   for (let n = 0; n < 64; n++) {
     const t = n * SIXTEENTH; const s = n % 16; const bar = Math.floor(n / 16);
     const chord = CHORDS[bar];
-    if (s === 0) chord.forEach((m) => tone(c, filter, 'triangle', hz(m), t, SIXTEENTH * 16, calm ? 0.08 : 0.05, 0.3));
-    if (!calm && s % 4 === 0) kick(t);
-    if (!calm && (s === 4 || s === 12)) hiss(t, 0.14, 0.35, 'bandpass', 1800);
-    if (mode === 'final' || (!calm && s % 4 === 2)) hiss(t, 0.04, s % 4 === 2 ? 0.25 : 0.12, 'highpass', 6000);
-    if (calm ? s === 0 : s % 2 === 0) tone(c, filter, 'sawtooth', hz(BASS[bar] + (!calm && s % 4 === 2 ? 12 : 0)), t, calm ? SIXTEENTH * 14 : SIXTEENTH * 1.6, calm ? 0.16 : 0.22);
-    if (calm ? s % 4 === 0 : s % 2 === 0) tone(c, filter, 'square', hz(chord[(s / 2 | 0) % 3] + 12), t, SIXTEENTH * 1.4, calm ? 0.05 : 0.06);
-    if (mode === 'final' && s % 2 === 1) tone(c, filter, 'square', hz(chord[2] + 24), t, SIXTEENTH * 0.8, 0.04);
+    if (calm) {
+      if (s === 0) { chord.forEach((m) => tone(c, filter, 'sawtooth', hz(m), t, SIXTEENTH * 16, 0.05, 0.4)); kick(t, 0.45); tone(c, filter, 'sine', hz(BASS[bar]), t, SIXTEENTH * 8, 0.3, 0.02); }
+      if (s === 8) kick(t, 0.3);
+      if (s % 4 === 2) hissAt(c, filter, noise, t, 0.05, 0.08, 'highpass', 7000);
+      continue;
+    }
+    if (s % 4 === 0) kick(t, 0.95);
+    if (s === 4 || s === 12) snare(t, 0.5);
+    if (s % 2 === 0) hissAt(c, filter, noise, t, 0.03, s % 4 === 2 ? 0.22 : 0.1, 'highpass', 8000); // charleston fermé
+    if (s % 4 === 2) hissAt(c, filter, noise, t, 0.14, 0.14, 'highpass', 6000); // charleston ouvert
+    if (final && s % 2 === 1) hissAt(c, filter, noise, t, 0.03, 0.12, 'highpass', 8000);
+    // Basse qui pompe : jouée entre les grosses caisses, comme un « sidechain ».
+    if (s % 4 !== 0) {
+      const m = BASS[bar] + (s % 4 === 2 ? 12 : 0);
+      tone(c, filter, 'sawtooth', hz(m), t, SIXTEENTH * 0.9, 0.2, 0.004);
+      tone(c, filter, 'square', hz(m - 12), t, SIXTEENTH * 0.9, 0.12, 0.004);
+    }
+    if (s === 6 || s === 14 || (bar % 2 === 1 && s === 11)) stab(c, filter, chord.map((x) => x + 12), t, 0.16, 0.035);
+    if (final) tone(c, filter, 'square', hz(chord[(n % 3)] + 24), t, SIXTEENTH * 0.7, 0.05, 0.003); // arpège rapide
+    if (final && bar === 3 && s >= 8) snare(t, 0.12 + (s - 8) * 0.05); // roulement qui monte
+  }
+  if (final) { // souffle qui monte sur toute la boucle
+    const src = c.createBufferSource(); const f = c.createBiquadFilter(); const g = c.createGain();
+    src.buffer = noise; src.loop = true; f.type = 'bandpass'; f.Q.value = 2;
+    const T = 64 * SIXTEENTH;
+    f.frequency.setValueAtTime(400, 0); f.frequency.exponentialRampToValueAtTime(6000, T);
+    g.gain.setValueAtTime(0.0001, 0); g.gain.exponentialRampToValueAtTime(0.18, T - 0.05); g.gain.linearRampToValueAtTime(0, T);
+    src.connect(f).connect(g).connect(mix); src.start(0); src.stop(T);
   }
 }
-const beeps = (list) => (c, dest) => list.forEach(([t, f, d]) => tone(c, dest, 'sine', f, t, d, 0.9, 0.01));
+
+// Cloche de boxe : partiels non harmoniques, longue résonance.
+function bell(c, dest, t, peak = 0.25) {
+  [[1, 1], [1.5, 0.5], [2, 0.6], [2.74, 0.35], [3.76, 0.2]].forEach(([r, a]) => tone(c, dest, 'sine', 820 * r, t, 1.6 / r ** 0.3, peak * a, 0.002));
+}
+// Sifflet d'arbitre : son aigu qui « roule » (modulation rapide) + souffle.
+function whistle(c, dest, t, dur, peak = 0.5) {
+  const o = c.createOscillator(); const lfo = c.createOscillator(); const depth = c.createGain(); const g = c.createGain();
+  o.type = 'sine'; o.frequency.value = 2900; lfo.frequency.value = 32; depth.gain.value = 220;
+  lfo.connect(depth).connect(o.frequency);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.02);
+  g.gain.setValueAtTime(peak, t + dur - 0.04); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(dest); o.start(t); lfo.start(t); o.stop(t + dur + 0.02); lfo.stop(t + dur + 0.02);
+}
+const tick = (c, dest, t) => tone(c, dest, 'sine', 880, t, 0.12, 0.8, 0.003);
 const CLIPS = {
-  count: [3.6, beeps([[0, 660, 0.15], [1, 660, 0.15], [2, 660, 0.15], [3, 1040, 0.4]])], // 3, 2, 1, top départ
-  rest: [0.6, beeps([[0, 440, 0.45]])],
-  end: [1.3, beeps([[0, 1040, 0.2], [0.25, 1040, 0.2], [0.5, 1040, 0.2], [0.75, 1320, 0.4]])],
-  test: [0.8, beeps([[0, 660, 0.15], [0.2, 880, 0.15], [0.4, 1040, 0.25]])],
+  // Séance libre : 3 tops puis sifflet « tu-tuuut » au départ de l'effort.
+  count: [3.8, (c, d) => { [0, 1, 2].forEach((t) => tick(c, d, t)); whistle(c, d, 3, 0.12); whistle(c, d, 3.2, 0.5); }],
+  // Fin d'effort : double coup de cloche.
+  rest: [2.2, (c, d) => { bell(c, d, 0); bell(c, d, 0.3); }],
+  // Fin de séance : trois coups de cloche.
+  end: [2.8, (c, d) => { bell(c, d, 0); bell(c, d, 0.35); bell(c, d, 0.7); }],
+  // Muscu, fin du repos : 3 tops puis cloche (lancé à 3 s de la fin) ; « bell » seul si le repos est très court.
+  restEnd: [5, (c, d) => { [0, 1, 2].forEach((t) => tick(c, d, t)); bell(c, d, 3); bell(c, d, 3.3); }],
+  bell: [2.2, (c, d) => { bell(c, d, 0); bell(c, d, 0.3); }],
+  test: [2.4, (c, d) => { [0, 0.25].forEach((t) => tick(c, d, t)); whistle(c, d, 0.5, 0.4); bell(c, d, 1.1); }],
 };
 
 const clips = {};
+export { clips as soundFiles }; // pour le diagnostic
 let preparing = null;
 // Fabrique les fichiers (moins d'une seconde) ; appelé dès l'ouverture de l'onglet Libre.
 export function prepareSounds() {
   if (!preparing) {
     preparing = (async () => {
       for (const [k, [secs, draw]] of Object.entries(CLIPS)) clips[k] = await render(secs, draw);
-      for (const m of ['work', 'rest', 'final']) clips[`m-${m}`] = await render(64 * SIXTEENTH, (c, d) => drawLoop(c, d, m));
+      const LOUD = { work: 0.17, final: 0.19, rest: 0.08 };
+      for (const m of ['work', 'rest', 'final']) clips[`m-${m}`] = await render(64 * SIXTEENTH, (c, d) => drawLoop(c, d, m), LOUD[m]);
     })().catch((e) => { preparing = null; throw e; });
   }
   return preparing;
@@ -113,8 +188,10 @@ function silentUrl() {
 }
 // À appeler PENDANT un toucher (Démarrer, Reprendre, Tester le son) : iPhone n'autorise ensuite ces
 // deux lecteurs à jouer tout seuls (changement de piste, bips) que s'ils ont déjà joué sur un toucher.
-export function unlockAudio() {
-  if (navigator.audioSession) { try { navigator.audioSession.type = 'playback'; } catch { /* ancien Safari */ } }
+// type « playback » (séance libre, avec musique : passe en mode silencieux) ou « transient » (muscu : un
+// court son qui baisse ta propre musique au lieu de la couper, mais muet en mode silencieux).
+export function unlockAudio(type = 'playback') {
+  if (navigator.audioSession) { try { navigator.audioSession.type = type; } catch { /* ancien Safari */ } }
   musicEl = musicEl || player(); fxEl = fxEl || player();
   for (const a of [musicEl, fxEl]) {
     if (!a.paused) continue;
@@ -148,7 +225,8 @@ export function musicStop() {
   musicWanted = false; musicCur = null;
   if (musicEl) musicEl.pause();
 }
-// Bips : « count » (3-2-1 puis top), « rest », « end », « test ».
+export function fxStop() { if (fxEl && fxEl.src !== silentUrl()) fxEl.pause(); }
+// Sons : « count », « rest », « end », « restEnd », « bell », « test » (voir CLIPS).
 export function fx(name) {
   if (!fxEl || !clips[name]) return;
   play(fxEl, clips[name], false).catch((e) => { lastError = e.name || 'erreur'; });
