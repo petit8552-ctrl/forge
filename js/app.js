@@ -555,35 +555,14 @@ let timerEnd = 0;
 const SOUND_KEY = 'forge.sound';
 const soundOn = () => { try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; } };
 let audioCtx = null;
-let loudSession = false;
-// iPhone d'avant iOS 17 : le son du navigateur suit le bouton silencieux. Lire un petit fichier audio
-// muet (élément <audio>) pendant un toucher fait passer la page en mode « lecture », qui l'ignore.
-let silentEl = null;
-function unmuteIOS(on) {
-  loudSession = on;
-  if (navigator.audioSession) navigator.audioSession.type = on ? 'playback' : 'transient';
-  try {
-    if (!on) { if (silentEl) silentEl.pause(); return; }
-    if (!silentEl) {
-      const n = 4410; const buf = new ArrayBuffer(44 + n * 2); const v = new DataView(buf);
-      const w = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
-      w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true);
-      v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 44100, true); v.setUint32(28, 88200, true);
-      v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
-      silentEl = document.createElement('audio');
-      silentEl.src = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-      silentEl.loop = true; silentEl.setAttribute('playsinline', ''); silentEl.preload = 'auto';
-    }
-    const pr = silentEl.play(); if (pr && pr.catch) pr.catch(() => {});
-  } catch { /* pas grave : le son marchera hors mode silencieux */ }
-}
 let audioCheck = null; // { wall, t } : pour repérer une horloge audio figée (bug iOS)
 let scheduled = [];
 function audio() {
   try {
     // « transient » : son court qui baisse la musique en cours au lieu de la couper (Safari récent).
     // Séance libre avec musique : « playback », qui joue même quand l'iPhone est en mode silencieux.
-    if (navigator.audioSession) navigator.audioSession.type = loudSession ? 'playback' : 'transient';
+    // (Pendant la séance libre, coach-audio.js la règle sur « playback » : on n'y touche pas.)
+    if (navigator.audioSession && !player) navigator.audioSession.type = 'transient';
     const AC = window.AudioContext || window.webkitAudioContext;
     // iPhone : après un verrouillage ou un changement d'appli, le son passe en « interrupted »,
     // ou reste « running » avec une horloge figée. On recrée alors un contexte neuf : appelé
@@ -607,7 +586,7 @@ function audio() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   if (timerId && timerEnd) scheduleEndSound(Math.max(0, (timerEnd - Date.now()) / 1000));
-  if (player && !player.paused) { scheduleSteps(); syncMusic(); }
+  if (player && !player.paused) syncMusic();
 });
 function beep(ctx, at, freq, dur) {
   const osc = ctx.createOscillator(); const gain = ctx.createGain();
@@ -716,6 +695,7 @@ function bindVolets(o) {
   }));
 }
 function renderLibre() {
+  Coach.prepareSounds().catch(() => {}); // fabrique musique et bips à l'avance (une fois)
   const o = libreOpts();
   if (o.volet === 'cible') return renderCibleSetup();
   const plan = buildFreeSession(o, o.seed);
@@ -973,6 +953,7 @@ function freeMedia(st, next) {
 let player = null; // { plan, idx, endAt, left, paused, elapsed, lastTick, done, cheer, marks }
 let playerTick = null;
 const MUSIC_KEY = 'forge.music';
+const APP_VERSION = 'v21'; // même numéro que CACHE dans sw.js
 const VOICE_KEY = 'forge.voice';
 const prefOn = (k) => { try { return localStorage.getItem(k) !== 'off'; } catch { return true; } };
 const togglePref = (k) => { try { localStorage.setItem(k, prefOn(k) ? 'off' : 'on'); } catch { /* rien */ } };
@@ -987,19 +968,20 @@ function startPlayer(plan) {
 // Musique : tourne pendant la séance, se coupe en pause. Ambiance selon l'étape.
 function syncMusic() {
   if (!player || player.paused || !prefOn(MUSIC_KEY)) { Coach.musicStop(); return; }
-  Coach.musicStart(audio(), musicMode(player.plan.steps[player.idx], player.left));
+  Coach.musicStart(musicMode(player.plan.steps[player.idx], player.left));
 }
-// Bouton « Tester le son » : même déblocage que pendant la séance, puis bips, musique et voix.
-function soundTest() {
-  unmuteIOS(true);
-  const ctx = audio();
-  if (ctx) [0, 0.15, 0.3].forEach((d, i) => beep(ctx, ctx.currentTime + d, [660, 880, 1040][i], 0.15));
-  Coach.primeVoice();
-  Coach.musicStart(ctx, 'work');
-  Coach.say('Le son fonctionne. Bonne séance !', true);
-  setTimeout(() => { if (!player) { Coach.musicStop(); unmuteIOS(false); } }, 4000);
+// Bouton « Tester le son » : même déblocage que pendant la séance, puis bips, musique et voix,
+// avec un compte rendu à l'écran (utile pour comprendre un téléphone muet).
+async function soundTest() {
   const hint = $app.querySelector('#soundhint');
-  if (hint) hint.innerHTML = 'Tu dois entendre trois bips, la musique et la voix. Rien ? Monte le volume (boutons sur le côté) et vérifie que le son n’est pas coupé dans le centre de contrôle.';
+  Coach.unlockAudio(); Coach.primeVoice(); // pendant le toucher
+  if (hint) hint.textContent = 'Test en cours…';
+  const r = await Coach.selfTest();
+  setTimeout(() => { if (!player) Coach.releaseAudio(); }, 4000);
+  const mark = (x) => (x === 'ok' ? '✅' : `❌ ${esc(x)}`);
+  if (hint) hint.innerHTML = `<b>Bips</b> ${mark(r.fx)} · <b>Musique</b> ${mark(r.music)} · <b>Voix</b> ${mark(r.voice)}
+    <br>Version ${APP_VERSION} · ${r.standalone ? 'appli écran d’accueil' : 'navigateur'} · ${r.voices} voix françaises
+    <br>${r.fx === 'ok' && r.music === 'ok' ? 'Rien entendu malgré les ✅ ? Monte le volume avec les boutons sur le côté du téléphone, pendant le test.' : 'Fais une capture de cet écran et envoie-la : elle dit ce qui bloque.'}`;
 }
 // Le coach parle (si la voix est activée) et la phrase s'affiche sous le chrono.
 function coachSay(text, urgent) {
@@ -1016,27 +998,14 @@ function introduceStep() {
   if (mark) text = `${mark} ${text}`;
   coachSay(text, true);
 }
-function scheduleSteps() {
-  cancelSound();
-  if (!soundOn() || !player) return;
-  const ctx = audio(); if (!ctx) return;
-  let t = ctx.currentTime + player.left;
-  for (let i = player.idx + 1; i <= player.plan.steps.length; i++) {
-    const next = player.plan.steps[i];
-    if (!next) { for (const d of [0, 0.25, 0.5, 0.75]) beep(ctx, t + d, 1040, 0.2); break; }
-    if (next.kind === 'work') { for (const s of [3, 2, 1]) if (t - s > ctx.currentTime) beep(ctx, t - s, 660, 0.12); beep(ctx, t, 1040, 0.35); }
-    else beep(ctx, t, 440, 0.4);
-    t += next.secs;
-    if (i - player.idx > 400) break;
-  }
-}
+// Les bips de la séance libre passent par un vrai fichier audio (voir tickPlayer) : plus de Web Audio ici.
+function scheduleSteps() { cancelSound(); }
 function resumePlayer() {
   if (!player) return;
   const first = !player.started;
   player.paused = false; player.started = true; player.lastTick = Date.now();
-  unmuteIOS(true); // avant audio() : le son passe même en mode silencieux
-  scheduleSteps(); keepAwake(true);
-  Coach.primeVoice(); syncMusic(); // appelé pendant le toucher : débloque son et voix sur iPhone
+  Coach.unlockAudio(); Coach.primeVoice(); // pendant le toucher : débloque son et voix sur iPhone
+  keepAwake(true); syncMusic();
   if (first) introduceStep();
   clearInterval(playerTick);
   playerTick = setInterval(tickPlayer, 250);
@@ -1045,7 +1014,7 @@ function pausePlayer() {
   if (!player || player.paused) return;
   tickPlayer();
   player.paused = true; clearInterval(playerTick); playerTick = null;
-  cancelSound(); keepAwake(false); Coach.musicStop(); Coach.hush(); unmuteIOS(false);
+  cancelSound(); keepAwake(false); Coach.releaseAudio(); Coach.hush();
   if (location.hash.startsWith('#/libre/go')) paintPlayer(true);
 }
 function tickPlayer() {
@@ -1063,6 +1032,11 @@ function tickPlayer() {
     if (navigator.vibrate) navigator.vibrate(player.plan.steps[player.idx].kind === 'work' ? [150, 80, 150] : 300);
   }
   const st = player.plan.steps[player.idx];
+  if (soundOn()) {
+    const nx = player.plan.steps[player.idx + 1];
+    if (changed && st.kind === 'rest') Coach.fx('rest');
+    else if (!changed && nx && nx.kind === 'work' && prev > 3 && player.left <= 3) Coach.fx('count'); // 3, 2, 1, top
+  }
   if (changed) introduceStep();
   else for (const c of stepCues(st, prev, player.left, player.idx)) coachSay(c, /^\d$/.test(c));
   if (prefOn(MUSIC_KEY)) Coach.musicMode(musicMode(st, player.left));
@@ -1076,12 +1050,13 @@ function skipStep() {
   player.idx++;
   if (player.idx >= player.plan.steps.length) { finishPlayer(true); return; }
   player.left = player.plan.steps[player.idx].secs;
-  if (!player.paused) { player.lastTick = Date.now(); scheduleSteps(); syncMusic(); introduceStep(); }
+  if (!player.paused) { player.lastTick = Date.now(); syncMusic(); introduceStep(); }
   paintPlayer(true);
 }
 function finishPlayer(completed) {
   clearInterval(playerTick); playerTick = null; cancelSound(); keepAwake(false);
-  Coach.musicStop(); Coach.hush(); unmuteIOS(false);
+  Coach.releaseAudio(); Coach.hush();
+  if (completed && soundOn()) Coach.fx('end');
   if (completed && prefOn(VOICE_KEY)) Coach.say('Séance terminée, bravo ! Tu peux être fier de toi.');
   const pl = player; player = null;
   const minutes = Math.round(pl.elapsed / 60);
@@ -1167,7 +1142,6 @@ function paintPlayer(full) {
   };
   $app.querySelector('#psound').onclick = () => {
     try { localStorage.setItem(SOUND_KEY, soundOn() ? 'off' : 'on'); } catch { /* rien */ }
-    if (!player.paused) scheduleSteps(); else cancelSound();
     paintPlayer(true);
   };
 }
