@@ -10,6 +10,8 @@ import { buildFreeSession, blockGuide, repTarget, durationsFor, PLACES, EQUIP, M
 import { badges, newBadges, weekStreak } from './rewards.js';
 import { howto } from './coaching.js';
 import { migrateIds } from './ids.js';
+import { stepIntro, stepCues, milestone, musicMode } from './cheer.js';
+import * as Coach from './coach-audio.js';
 import { setVolume, setE1rm, isRealSession, perDumbbell } from './stats.js';
 import { buildTargeted, buildSuperset, nextInZone, swapExercise, MUSCLES, CIBLE_EQUIP, CIBLE_DURATIONS, CIBLE_DEFAULT_EQUIP, CLASSIC_PAIRS, primaryMuscle, recentMuscles, adjustText } from './cible.js';
 
@@ -582,7 +584,7 @@ function audio() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   if (timerId && timerEnd) scheduleEndSound(Math.max(0, (timerEnd - Date.now()) / 1000));
-  if (player && !player.paused) scheduleSteps();
+  if (player && !player.paused) { scheduleSteps(); syncMusic(); }
 });
 function beep(ctx, at, freq, dur) {
   const osc = ctx.createOscillator(); const gain = ctx.createGain();
@@ -933,13 +935,40 @@ function freeMedia(st, ph) {
       <figcaption><span class="lbl">Départ ⇄ arrivée</span>${video}</figcaption></figure>`;
 }
 
-// Lecteur : enchaîne les étapes (effort / récup) avec décompte et bips.
-let player = null; // { plan, idx, endAt, left, paused, elapsed, lastTick, done }
+// Lecteur : enchaîne les étapes (effort / récup) avec décompte, bips, musique et voix du coach.
+let player = null; // { plan, idx, endAt, left, paused, elapsed, lastTick, done, cheer, marks }
 let playerTick = null;
+const MUSIC_KEY = 'forge.music';
+const VOICE_KEY = 'forge.voice';
+const prefOn = (k) => { try { return localStorage.getItem(k) !== 'off'; } catch { return true; } };
+const togglePref = (k) => { try { localStorage.setItem(k, prefOn(k) ? 'off' : 'on'); } catch { /* rien */ } };
 function startPlayer(plan) {
   stopTimer();
-  player = { plan, idx: 0, left: plan.steps[0].secs, paused: true, elapsed: 0, lastTick: null, started: false, done: new Set() };
+  // 5 s pour poser le téléphone et se mettre en place avant le premier exercice.
+  const ready = { phase: 'ready', kind: 'rest', label: 'Prêt ?', cue: 'Pose le téléphone, mets-toi en place.', secs: 5, block: plan.steps[0].block };
+  plan = { ...plan, steps: [ready, ...plan.steps] };
+  player = { plan, idx: 0, left: plan.steps[0].secs, paused: true, elapsed: 0, lastTick: null, started: false, done: new Set(), cheer: '', marks: new Set() };
   resumePlayer();
+}
+// Musique : tourne pendant la séance, se coupe en pause. Ambiance selon l'étape.
+function syncMusic() {
+  if (!player || player.paused || !prefOn(MUSIC_KEY)) { Coach.musicStop(); return; }
+  Coach.musicStart(audio(), musicMode(player.plan.steps[player.idx], player.left));
+}
+// Le coach parle (si la voix est activée) et la phrase s'affiche sous le chrono.
+function coachSay(text, urgent) {
+  if (!text || !player) return;
+  if (!/^\d$/.test(text)) player.cheer = text;
+  if (prefOn(VOICE_KEY)) Coach.say(text, urgent);
+}
+function introduceStep() {
+  const steps = player.plan.steps;
+  let text = stepIntro(steps, player.idx);
+  const total = steps.reduce((t, x) => t + x.secs, 0);
+  const done = steps.slice(0, player.idx).reduce((t, x) => t + x.secs, 0);
+  const mark = steps[player.idx].kind === 'rest' ? milestone(done / total, player.marks) : '';
+  if (mark) text = `${mark} ${text}`;
+  coachSay(text, true);
 }
 function scheduleSteps() {
   cancelSound();
@@ -957,8 +986,11 @@ function scheduleSteps() {
 }
 function resumePlayer() {
   if (!player) return;
+  const first = !player.started;
   player.paused = false; player.started = true; player.lastTick = Date.now();
   scheduleSteps(); keepAwake(true);
+  Coach.primeVoice(); syncMusic(); // appelé pendant le toucher : débloque son et voix sur iPhone
+  if (first) introduceStep();
   clearInterval(playerTick);
   playerTick = setInterval(tickPlayer, 250);
 }
@@ -966,13 +998,14 @@ function pausePlayer() {
   if (!player || player.paused) return;
   tickPlayer();
   player.paused = true; clearInterval(playerTick); playerTick = null;
-  cancelSound(); keepAwake(false);
+  cancelSound(); keepAwake(false); Coach.musicStop(); Coach.hush();
   if (location.hash.startsWith('#/libre/go')) paintPlayer(true);
 }
 function tickPlayer() {
   if (!player || player.paused) return;
   const now = Date.now();
   const dt = (now - player.lastTick) / 1000; player.lastTick = now;
+  const prev = player.left;
   player.left -= dt; player.elapsed += dt;
   let changed = false;
   while (player.left <= 0 && player.idx < player.plan.steps.length) {
@@ -982,6 +1015,10 @@ function tickPlayer() {
     player.left += player.plan.steps[player.idx].secs;
     if (navigator.vibrate) navigator.vibrate(player.plan.steps[player.idx].kind === 'work' ? [150, 80, 150] : 300);
   }
+  const st = player.plan.steps[player.idx];
+  if (changed) introduceStep();
+  else for (const c of stepCues(st, prev, player.left, player.idx)) coachSay(c, /^\d$/.test(c));
+  if (prefOn(MUSIC_KEY)) Coach.musicMode(musicMode(st, player.left));
   if (location.hash.startsWith('#/libre/go')) paintPlayer(changed);
 }
 function skipStep() {
@@ -992,11 +1029,13 @@ function skipStep() {
   player.idx++;
   if (player.idx >= player.plan.steps.length) { finishPlayer(true); return; }
   player.left = player.plan.steps[player.idx].secs;
-  if (!player.paused) { player.lastTick = Date.now(); scheduleSteps(); }
+  if (!player.paused) { player.lastTick = Date.now(); scheduleSteps(); syncMusic(); introduceStep(); }
   paintPlayer(true);
 }
 function finishPlayer(completed) {
   clearInterval(playerTick); playerTick = null; cancelSound(); keepAwake(false);
+  Coach.musicStop(); Coach.hush();
+  if (completed && prefOn(VOICE_KEY)) Coach.say('Séance terminée, bravo ! Tu peux être fier de toi.');
   const pl = player; player = null;
   const minutes = Math.round(pl.elapsed / 60);
   // Seuls les efforts réellement faits sont enregistrés (pas ceux passés avec « Suivant »).
@@ -1036,19 +1075,26 @@ function paintPlayer(full) {
   const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
   const total = pl.plan.steps.reduce((t, x) => t + x.secs, 0);
   const doneSecs = pl.plan.steps.slice(0, pl.idx).reduce((t, x) => t + x.secs, 0) + (st.secs - pl.left);
+  const final = left <= 5 && left > 0 && (st.kind === 'work' || st.phase === 'ready' || !next || next.kind === 'work');
   if (!full && $app.querySelector('#pclock')) {
-    $app.querySelector('#pclock').textContent = clock;
+    const c = $app.querySelector('#pclock');
+    c.textContent = clock; c.classList.toggle('final', final);
+    const ch = $app.querySelector('#pcheer'); if (ch && ch.textContent !== pl.cheer) ch.textContent = pl.cheer;
     $app.querySelector('#pbar').style.width = `${Math.min(100, (doneSecs / total) * 100)}%`;
     return;
   }
   const ph = st.photo ? { start: `media/${st.photo}_0.jpg`, end: `media/${st.photo}_1.jpg` } : null;
   $app.innerHTML = `
     <div class="row between"><div class="eyebrow">${esc(st.block)}${st.pos ? ` · ${esc(st.pos)}` : ''}</div>
-      <button class="btn ghost sm" id="psound">${soundOn() ? '🔔' : '🔕'}</button></div>
+      <div class="row" style="gap:6px">
+        <button class="btn ghost sm" id="pmusic" aria-label="Musique" title="Musique">${prefOn(MUSIC_KEY) ? '🎵' : '<s>🎵</s>'}</button>
+        <button class="btn ghost sm" id="pvoice" aria-label="Voix du coach" title="Voix du coach">${prefOn(VOICE_KEY) ? '🗣️' : '<s>🗣️</s>'}</button>
+        <button class="btn ghost sm" id="psound" aria-label="Bips" title="Bips">${soundOn() ? '🔔' : '🔕'}</button></div></div>
     <div class="phasebar" style="margin:10px 0 16px"><i class="on" id="pbar" style="width:${Math.min(100, (doneSecs / total) * 100)}%;flex:none"></i></div>
     <div class="player ${st.kind}">
-      <div class="small muted">${st.kind === 'work' ? (st.phase === 'main' ? 'Effort' : '') : 'Récupération'}</div>
-      <div class="pclock" id="pclock">${clock}</div>
+      <div class="small muted">${st.phase === 'ready' ? 'Mise en place' : st.kind === 'work' ? (st.phase === 'main' ? 'Effort' : '') : 'Récupération'}</div>
+      <div class="pclock${final ? ' final' : ''}" id="pclock">${clock}</div>
+      <div class="cheer" id="pcheer" aria-live="polite">${esc(pl.cheer)}</div>
       <h1 style="margin:4px 0 6px">${esc(st.label)}</h1>
       ${st.kind === 'work' && st.phase === 'main' && st.exId && !st.exId.startsWith('m-') && st.secs < 300
         ? `<div class="target">${(() => { const t = repTarget(st.exId, st.secs, state.profile.level); return t.reps ? `Objectif : <b>${esc(t.text)}</b>` : `<b>${esc(t.text[0].toUpperCase() + t.text.slice(1))}</b>`; })()}</div>` : ''}
@@ -1067,6 +1113,12 @@ function paintPlayer(full) {
   // Regarder la vidéo fait quitter l'appli : on met en pause pour ne pas perdre l'étape.
   $app.querySelectorAll('[data-pvideo]').forEach((a) => a.addEventListener('click', () => { if (!player.paused) pausePlayer(); }));
   $app.querySelector('#pstop').onclick = () => { pausePlayer(); finishPlayer(false); };
+  $app.querySelector('#pmusic').onclick = () => { togglePref(MUSIC_KEY); syncMusic(); paintPlayer(true); };
+  $app.querySelector('#pvoice').onclick = () => {
+    togglePref(VOICE_KEY);
+    if (prefOn(VOICE_KEY)) { Coach.primeVoice(); Coach.say('Voix du coach activée.', true); } else Coach.hush();
+    paintPlayer(true);
+  };
   $app.querySelector('#psound').onclick = () => {
     try { localStorage.setItem(SOUND_KEY, soundOn() ? 'off' : 'on'); } catch { /* rien */ }
     if (!player.paused) scheduleSteps(); else cancelSound();

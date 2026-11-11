@@ -144,6 +144,12 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .player .pclock { font-size: 72px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1; margin: 6px 0; }
 .player.work .pclock { color: var(--accent); }
 .player.rest .pclock { color: var(--blue); }
+/* 5 dernières secondes : gros chiffres qui pulsent, impossible à rater de loin. */
+.player .pclock.final { color: #ff7a45; transform: scale(1.2); animation: pclock-pulse 1s ease-out infinite; }
+@keyframes pclock-pulse { 0% { transform: scale(1.4); } 60%, 100% { transform: scale(1.2); } }
+.player .cheer { min-height: 22px; margin: 2px 0 8px; font-weight: 700; color: var(--accent); font-size: 16px; }
+.player.rest .cheer { color: var(--blue); }
+@media (prefers-reduced-motion: reduce) { .player .pclock.final { animation: none; } }
 .player .ex-media { margin-top: 8px; }
 
 /* Récompenses */
