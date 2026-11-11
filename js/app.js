@@ -1,6 +1,6 @@
 import {
   bodyMetrics, coachAdvice, splitFor, buildSession, currentWeek, dateFor, todayIndex, phaseOf, blockOf,
-  PHASES, DAY_NAMES, DEFAULT_DAYS, poolFor, weeklyVolume, e1rm, mondayOf, readiness, fmtH,
+  PHASES, DAY_NAMES, DEFAULT_DAYS, poolFor, weeklyVolume, e1rm, mondayOf, readiness, fmtH, lastPerformance,
 } from './engine.js';
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import { BY_ID, PATTERN_LABEL } from './exercises.js';
@@ -349,10 +349,14 @@ function draftFor(s) {
   for (const e of s.exercises) {
     const cur = d.exercises[e.slot];
     if (!cur || cur.id !== e.id) {
-      d.exercises[e.slot] = { id: e.id, sets: Array.from({ length: e.sets }, () => ({ w: e.load ?? '', r: '', done: false })) };
+      d.exercises[e.slot] = { id: e.id, auto: true, sets: Array.from({ length: e.sets }, () => ({ w: e.load ?? '', r: '', done: false })) };
     } else if (cur.sets.length !== e.sets) {
       cur.sets = Array.from({ length: e.sets }, (_, i) => cur.sets[i] || { w: e.load ?? '', r: '', done: false });
     }
+    // Séance ouverte à l'avance : tant que tu n'as rien saisi, la charge suit tes dernières séances
+    // (sinon elle resterait figée au jour où tu as regardé la séance).
+    const dx = d.exercises[e.slot];
+    if (dx.auto !== false && !dx.sets.some((x) => x.done)) for (const x of dx.sets) x.w = e.load ?? '';
   }
   return { key, data: d, locked: false };
 }
@@ -433,6 +437,7 @@ function bindSetControls(data, exList) {
     inp.addEventListener('input', () => {
       const { slot, set, field } = inp.dataset;
       data.exercises[slot].sets[set][field] = inp.value === '' ? '' : parseFloat(inp.value.replace(',', '.'));
+      if (field === 'w') data.exercises[slot].auto = false; // charge choisie à la main : on la garde
       save();
     });
   });
@@ -461,6 +466,20 @@ function bindSetControls(data, exList) {
   });
 }
 
+// « Dernière fois » : ce que tu as fait sur cet exercice à ta dernière séance, quel que soit le volet.
+function lastTimeLine(e) {
+  const lp = lastPerformance(state.history, e.id);
+  if (!lp || !lp.sets.length) return '';
+  const sets = lp.sets.filter((x) => x.r > 0 || x.secs);
+  if (!sets.length) return '';
+  const day = new Date(lp.session.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+  const ws = [...new Set(sets.map((x) => x.w || 0))];
+  const body = sets[0].secs ? `${sets.length} × ${sets[0].secs} s`
+    : ws.length === 1 ? `${ws[0] ? `${String(ws[0]).replace('.', ',')} kg × ` : ''}${sets.map((x) => x.r).join(' · ')} reps`
+      : sets.map((x) => `${String(x.w || 0).replace('.', ',')}×${x.r}`).join(' · ');
+  return `<div class="small last-time">↺ Dernière fois (${day}) : <b>${body}</b></div>`;
+}
+
 // Exercices au poids du corps (ou à l'élastique) : pas de colonne kg, sauf ceux où l'on peut ajouter un lest.
 const WEIGHTED_BODYWEIGHT = new Set(['pullup', 'chinup', 'dips']);
 function exerciseCard(e, i, d, locked) {
@@ -480,6 +499,7 @@ function exerciseCard(e, i, d, locked) {
       <span class="pill">RIR ${e.rir}</span>
       <span class="pill">${e.restLabel ? esc(e.restLabel) : `Repos ${e.rest >= 120 ? (e.rest / 60).toString().replace('.', ',') + ' min' : e.rest + ' s'}`}</span>
       ${e.load ? `<span class="pill">${e.assisted ? 'Assistance ' : ''}${kg(e.load)}${e.unit === 'halteres' ? ' / haltère' : ''}</span>` : ''}
+      ${locked ? '' : lastTimeLine(e)}
     </div>
     ${mediaBlock(e)}
     <div class="ex-cue">${esc(e.cue)}${howtoBlock(e.id)}${e.loadNote ? `<div style="color:var(--text);margin-top:6px">${esc(e.loadNote)}</div>` : ''}</div>
@@ -525,6 +545,7 @@ document.addEventListener('click', (ev) => {
 // ---------- Minuteur de repos ----------
 const $timer = document.getElementById('timer');
 let timerId = null;
+let timerEnd = 0;
 
 // Son de fin de repos. Les bips sont programmés dans le moteur audio dès le départ du minuteur
 // (au moment du toucher, seul moment où iPhone autorise le son), puis annulés si on passe ou ajoute 30 s.
@@ -532,16 +553,37 @@ let timerId = null;
 const SOUND_KEY = 'forge.sound';
 const soundOn = () => { try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; } };
 let audioCtx = null;
+let audioCheck = null; // { wall, t } : pour repérer une horloge audio figée (bug iOS)
 let scheduled = [];
 function audio() {
   try {
     // « transient » : son court qui baisse la musique en cours au lieu de la couper (Safari récent).
     if (navigator.audioSession) navigator.audioSession.type = 'transient';
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    // iPhone : après un verrouillage ou un changement d'appli, le son passe en « interrupted »,
+    // ou reste « running » avec une horloge figée. On recrée alors un contexte neuf : appelé
+    // pendant un toucher (valider une série, Reprendre…), iOS l'autorise à jouer.
+    const frozen = audioCtx && audioCheck && audioCtx.state === 'running'
+      && Date.now() - audioCheck.wall > 1500 && audioCtx.currentTime === audioCheck.t;
+    if (!audioCtx || audioCtx.state === 'closed' || audioCtx.state === 'interrupted' || frozen) {
+      try { if (audioCtx) audioCtx.close(); } catch { /* déjà fermé */ }
+      audioCtx = new AC();
+    }
+    if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
+    // Débloque la sortie son sur iOS : un son vide joué pendant le toucher.
+    const src = audioCtx.createBufferSource();
+    src.buffer = audioCtx.createBuffer(1, 1, 22050);
+    src.connect(audioCtx.destination); src.start(0);
+    audioCheck = { wall: Date.now(), t: audioCtx.currentTime };
     return audioCtx;
   } catch { return null; }
 }
+// Retour dans l'appli : on relance le son et on reprogramme les bips en attente.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (timerId && timerEnd) scheduleEndSound(Math.max(0, (timerEnd - Date.now()) / 1000));
+  if (player && !player.paused) scheduleSteps();
+});
 function beep(ctx, at, freq, dur) {
   const osc = ctx.createOscillator(); const gain = ctx.createGain();
   osc.type = 'sine'; osc.frequency.value = freq;
@@ -580,6 +622,7 @@ function startTimer(seconds, label) {
   stopTimer();
   let left = seconds;
   const end = Date.now() + seconds * 1000;
+  timerEnd = end;
   $timer.hidden = false;
   scheduleEndSound(seconds);
   keepAwake(true);
@@ -611,7 +654,7 @@ function startTimer(seconds, label) {
   }, 1000);
 }
 function stopTimer() {
-  clearInterval(timerId); timerId = null; $timer.hidden = true; $timer.classList.remove('go');
+  clearInterval(timerId); timerId = null; timerEnd = 0; $timer.hidden = true; $timer.classList.remove('go');
   cancelSound(); keepAwake(false);
 }
 

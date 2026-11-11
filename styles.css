@@ -187,3 +187,5 @@ svg.chart text { fill: var(--muted); font-size: 10px; }
 .chips.volets { margin: 6px 0 12px; }
 .chips.volets .chip { flex: 1; }
 .linklike { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
+.last-time { flex-basis: 100%; color: var(--muted); margin-top: 2px; }
+.last-time b { color: var(--text); font-weight: 600; }
