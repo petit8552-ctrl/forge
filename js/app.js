@@ -562,7 +562,8 @@ function audio() {
     // « transient » : son court qui baisse la musique en cours au lieu de la couper (Safari récent).
     // Séance libre avec musique : « playback », qui joue même quand l'iPhone est en mode silencieux.
     // (Pendant la séance libre, coach-audio.js la règle sur « playback » : on n'y touche pas.)
-    if (navigator.audioSession && !player) navigator.audioSession.type = 'transient';
+    // « ambient » : se mélange à ta musique, ne la coupe jamais (voir coach-audio.js).
+    if (navigator.audioSession) navigator.audioSession.type = 'ambient';
     const AC = window.AudioContext || window.webkitAudioContext;
     // iPhone : après un verrouillage ou un changement d'appli, le son passe en « interrupted »,
     // ou reste « running » avec une horloge figée. On recrée alors un contexte neuf : appelé
@@ -622,9 +623,8 @@ function startTimer(seconds, label) {
   const end = Date.now() + seconds * 1000;
   timerEnd = end;
   $timer.hidden = false;
-  // Valider une série = un toucher : on débloque le lecteur audio. « transient » : le son baisse ta propre
-  // musique un instant au lieu de la couper.
-  if (!player) { Coach.unlockAudio('transient'); Coach.primeVoice(); Coach.prepareSounds().catch(() => {}); }
+  // Valider une série = un toucher : on débloque le lecteur audio (en mode « mélange » : ta musique continue).
+  if (!player) { Coach.unlockAudio(); Coach.prepareSounds().catch(() => {}); }
   let counted = false; // le 3-2-1 + cloche est-il parti ? Sinon (repos très court, minuteur ralenti) : cloche à 0
   keepAwake(true);
   const paint = () => {
@@ -648,7 +648,6 @@ function startTimer(seconds, label) {
     if (left <= 0) {
       clearInterval(timerId); timerId = null;
       if (soundOn() && !counted) Coach.fx('bell');
-      if (prefOn(VOICE_KEY)) Coach.say('C’est reparti, série suivante !', true);
       if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
       // Le bandeau reste 2 s en « C'est reparti » pour ceux qui ont coupé le son.
       $timer.innerHTML = '<div class="t">0:00</div><div class="grow"><b>C’est reparti 💪</b><div class="small muted">Série suivante</div></div>';
@@ -733,7 +732,7 @@ function renderLibre() {
       <div class="tip small"><div>Retour au calme · ${plan.steps.filter((x) => x.phase === 'cooldown').length} min</div></div>
       <div class="row" style="margin-top:12px"><button class="btn ghost" id="reroll" style="flex:1">↻ Autre séance</button><button class="btn primary" id="go" style="flex:1">▶ Démarrer</button></div>
       <button class="btn ghost block" id="soundtest" style="margin-top:8px">🔊 Tester le son</button>
-      <p class="small muted" id="soundhint" style="margin:6px 0 0">Musique, voix du coach et bips pendant la séance. Rien entendu ? Monte le volume du téléphone.</p>
+      <p class="small muted" id="soundhint" style="margin:6px 0 0">Musique, voix du coach et bips pendant la séance, par-dessus ta propre musique sans la couper (coupe 🎵 si tu écoutes la tienne). Mode silencieux = pas de son.</p>
     </div>`;
 
   bindVolets(o);
@@ -957,7 +956,7 @@ function freeMedia(st, next) {
 let player = null; // { plan, idx, endAt, left, paused, elapsed, lastTick, done, cheer, marks }
 let playerTick = null;
 const MUSIC_KEY = 'forge.music';
-const APP_VERSION = 'v22'; // même numéro que CACHE dans sw.js
+const APP_VERSION = 'v23'; // même numéro que CACHE dans sw.js
 const VOICE_KEY = 'forge.voice';
 const prefOn = (k) => { try { return localStorage.getItem(k) !== 'off'; } catch { return true; } };
 const togglePref = (k) => { try { localStorage.setItem(k, prefOn(k) ? 'off' : 'on'); } catch { /* rien */ } };
@@ -984,8 +983,8 @@ async function soundTest() {
   setTimeout(() => { if (!player) Coach.releaseAudio(); }, 4000);
   const mark = (x) => (x === 'ok' ? '✅' : `❌ ${esc(x)}`);
   if (hint) hint.innerHTML = `<b>Bips</b> ${mark(r.fx)} · <b>Musique</b> ${mark(r.music)} · <b>Voix</b> ${mark(r.voice)}
-    <br>Version ${APP_VERSION} · ${r.standalone ? 'appli écran d’accueil' : 'navigateur'} · ${r.voices} voix françaises
-    <br>${r.fx === 'ok' && r.music === 'ok' ? 'Rien entendu malgré les ✅ ? Monte le volume avec les boutons sur le côté du téléphone, pendant le test.' : 'Fais une capture de cet écran et envoie-la : elle dit ce qui bloque.'}`;
+    <br>Version ${APP_VERSION} · ${r.standalone ? 'appli écran d’accueil' : 'navigateur'} · ${r.voices} voix françaises · ${r.mix ? 'se mélange à ta musique' : 'ancien iOS (Web Audio)'}
+    <br>${r.fx === 'ok' && r.music === 'ok' ? 'Rien entendu malgré les ✅ ? Désactive le mode silencieux (bouton sur le côté) et monte le volume : pour ne jamais couper ta musique, Forge reste muet en mode silencieux.' : 'Fais une capture de cet écran et envoie-la : elle dit ce qui bloque.'}`;
 }
 // Le coach parle (si la voix est activée) et la phrase s'affiche sous le chrono.
 function coachSay(text, urgent) {

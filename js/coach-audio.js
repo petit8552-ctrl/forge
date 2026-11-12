@@ -46,7 +46,7 @@ function render(secs, draw, loud = 0) {
   return new Promise((res, rej) => {
     c.oncomplete = (e) => res(e.renderedBuffer); // anciens Safari : pas de promesse
     const p = c.startRendering(); if (p && p.then) p.then(res, rej);
-  }).then((b) => toWav(level(b, loud)));
+  }).then((b) => { const l = level(b, loud); return { url: toWav(l), buf: l }; });
 }
 // Sortie commune : compresseur pour éviter la saturation quand tout joue ensemble.
 function out(c) {
@@ -162,23 +162,34 @@ const CLIPS = {
   test: [2.4, (c, d) => { [0, 0.25].forEach((t) => tick(c, d, t)); whistle(c, d, 0.5, 0.4); bell(c, d, 1.1); }],
 };
 
-const clips = {};
+const clips = {}; // nom -> fichier WAV (lecteur <audio>)
+const bufs = {};  // nom -> son brut (lecture Web Audio, anciens iPhone)
 export { clips as soundFiles }; // pour le diagnostic
 let preparing = null;
-// Fabrique les fichiers (moins d'une seconde) ; appelé dès l'ouverture de l'onglet Libre.
+// Fabrique les fichiers (moins d'une seconde) ; appelé dès l'ouverture de l'onglet Libre ou du minuteur.
 export function prepareSounds() {
   if (!preparing) {
     preparing = (async () => {
-      for (const [k, [secs, draw]] of Object.entries(CLIPS)) clips[k] = await render(secs, draw);
+      const keep = (k, r) => { clips[k] = r.url; bufs[k] = r.buf; };
+      for (const [k, [secs, draw]] of Object.entries(CLIPS)) keep(k, await render(secs, draw));
       const LOUD = { work: 0.17, final: 0.19, rest: 0.08 };
-      for (const m of ['work', 'rest', 'final']) clips[`m-${m}`] = await render(64 * SIXTEENTH, (c, d) => drawLoop(c, d, m), LOUD[m]);
+      for (const m of ['work', 'rest', 'final']) keep(`m-${m}`, await render(64 * SIXTEENTH, (c, d) => drawLoop(c, d, m), LOUD[m]));
     })().catch((e) => { preparing = null; throw e; });
   }
   return preparing;
 }
 
-// ---------- Lecteurs ----------
+// ---------- Lecture, sans jamais couper ta musique ----------
+// Règle : Forge ne doit JAMAIS arrêter la musique que tu écoutes (Spotify, Apple Music…).
+// - iPhone récent (iOS 17+) : session audio « ambient » = les sons de Forge se mélangent à ta musique.
+//   On peut alors utiliser des lecteurs <audio>, fiables.
+// - Ancien iPhone (pas de réglage de session) : un lecteur <audio> couperait ta musique. On joue donc
+//   les mêmes sons par Web Audio, qui se mélange par défaut.
+// Contrepartie assumée : en mode silencieux (bouton sur le côté), Forge reste muet.
+const canMix = () => typeof navigator !== 'undefined' && !!navigator.audioSession;
+function ambient() { if (canMix()) { try { navigator.audioSession.type = 'ambient'; } catch { /* rien */ } } }
 let musicEl = null; let fxEl = null; let silent = null;
+let ctx = null; let musicSrc = null; let fxSrc = null;
 let musicWanted = false; let musicCur = null;
 export let lastError = '';
 function player() { const a = document.createElement('audio'); a.setAttribute('playsinline', ''); a.preload = 'auto'; return a; }
@@ -186,12 +197,28 @@ function silentUrl() {
   if (!silent) silent = toWav({ getChannelData: () => new Float32Array(2205), sampleRate: RATE }); // 0,1 s de silence
   return silent;
 }
-// À appeler PENDANT un toucher (Démarrer, Reprendre, Tester le son) : iPhone n'autorise ensuite ces
-// deux lecteurs à jouer tout seuls (changement de piste, bips) que s'ils ont déjà joué sur un toucher.
-// type « playback » (séance libre, avec musique : passe en mode silencieux) ou « transient » (muscu : un
-// court son qui baisse ta propre musique au lieu de la couper, mais muet en mode silencieux).
-export function unlockAudio(type = 'playback') {
-  if (navigator.audioSession) { try { navigator.audioSession.type = type; } catch { /* ancien Safari */ } }
+function webCtx() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!ctx || ctx.state === 'closed') ctx = new AC();
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  return ctx;
+}
+function webPlay(buf, loop) {
+  const c = webCtx(); const src = c.createBufferSource();
+  src.buffer = buf; src.loop = loop; src.connect(c.destination); src.start();
+  return src;
+}
+const stopSrc = (x) => { try { if (x) x.stop(); } catch { /* déjà arrêté */ } };
+
+// À appeler PENDANT un toucher (Démarrer, Reprendre, valider une série, Tester le son) : iPhone n'autorise
+// ensuite les sons automatiques (bips, changement de piste) que si le lecteur a déjà joué sur un toucher.
+export function unlockAudio() {
+  ambient();
+  if (!canMix()) { // ancien iPhone : Web Audio, débloqué par un son vide
+    const c = webCtx(); const b = c.createBuffer(1, 1, 22050); const s = c.createBufferSource();
+    s.buffer = b; s.connect(c.destination); s.start(0);
+    return;
+  }
   musicEl = musicEl || player(); fxEl = fxEl || player();
   for (const a of [musicEl, fxEl]) {
     if (!a.paused) continue;
@@ -200,36 +227,43 @@ export function unlockAudio(type = 'playback') {
     if (p && p.then) p.then(() => { if (a.src === silentUrl()) a.pause(); }).catch((e) => { lastError = e.name || 'erreur'; });
   }
 }
-export function releaseAudio() {
-  musicStop();
-  if (navigator.audioSession) { try { navigator.audioSession.type = 'transient'; } catch { /* rien */ } }
-}
+export function releaseAudio() { musicStop(); }
 async function play(a, src, loop) {
   a.loop = loop; if (a.src !== src) a.src = src;
   try { a.currentTime = 0; } catch { /* pas encore chargé */ }
   await a.play();
 }
+async function playClip(name, loop) {
+  if (canMix()) { const a = loop ? musicEl : fxEl; if (!a) throw new Error('verrouillé'); await play(a, clips[name], loop); return; }
+  const src = webPlay(bufs[name], loop);
+  if (loop) { stopSrc(musicSrc); musicSrc = src; } else { stopSrc(fxSrc); fxSrc = src; }
+  if (ctx.state !== 'running') throw new Error(`son bloqué (${ctx.state})`);
+}
 
 export async function musicStart(mode = 'work') {
   musicWanted = true;
   try { await prepareSounds(); } catch { return; }
-  if (!musicWanted || !musicEl) return;
+  if (!musicWanted) return;
   musicCur = null; musicMode(mode);
 }
 export function musicMode(mode) {
-  if (!musicWanted || !musicEl || mode === musicCur || !clips[`m-${mode}`]) return;
+  if (!musicWanted || mode === musicCur || !clips[`m-${mode}`]) return;
   musicCur = mode;
-  play(musicEl, clips[`m-${mode}`], true).catch((e) => { lastError = e.name || 'erreur'; });
+  playClip(`m-${mode}`, true).catch((e) => { lastError = e.name || e.message || 'erreur'; });
 }
 export function musicStop() {
   musicWanted = false; musicCur = null;
   if (musicEl) musicEl.pause();
+  stopSrc(musicSrc); musicSrc = null;
 }
-export function fxStop() { if (fxEl && fxEl.src !== silentUrl()) fxEl.pause(); }
+export function fxStop() {
+  if (fxEl && fxEl.src !== silentUrl()) fxEl.pause();
+  stopSrc(fxSrc); fxSrc = null;
+}
 // Sons : « count », « rest », « end », « restEnd », « bell », « test » (voir CLIPS).
 export function fx(name) {
-  if (!fxEl || !clips[name]) return;
-  play(fxEl, clips[name], false).catch((e) => { lastError = e.name || 'erreur'; });
+  if (!clips[name]) return;
+  playClip(name, false).catch((e) => { lastError = e.name || e.message || 'erreur'; });
 }
 
 // ---------- Voix du coach (synthèse vocale du téléphone, en français) ----------
@@ -262,11 +296,11 @@ export function hush() { if (synth) synth.cancel(); }
 
 // ---------- Test du son, avec un compte rendu lisible ----------
 export async function selfTest() {
-  const r = { fx: '', music: '', voice: '', voices: frenchVoices().length, standalone: !!(navigator.standalone || matchMedia('(display-mode: standalone)').matches) };
+  const r = { fx: '', music: '', voice: '', voices: frenchVoices().length, mix: canMix(), standalone: !!(navigator.standalone || matchMedia('(display-mode: standalone)').matches) };
   try { await prepareSounds(); } catch (e) { r.fx = r.music = `fabrication impossible (${e.name || e})`; }
   if (!r.fx) {
-    try { await play(fxEl, clips.test, false); r.fx = 'ok'; } catch (e) { r.fx = e.name || 'erreur'; }
-    try { musicWanted = true; musicCur = 'work'; await play(musicEl, clips['m-work'], true); r.music = 'ok'; } catch (e) { r.music = e.name || 'erreur'; }
+    try { await playClip('test', false); r.fx = 'ok'; } catch (e) { r.fx = e.name || e.message || 'erreur'; }
+    try { musicWanted = true; musicCur = 'work'; await playClip('m-work', true); r.music = 'ok'; } catch (e) { r.music = e.name || e.message || 'erreur'; }
   }
   r.voice = await new Promise((res) => {
     if (!synth) { res('indisponible sur ce téléphone'); return; }
